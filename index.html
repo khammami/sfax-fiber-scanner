@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sfax Fiber (GPON) Coverage Scanner</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Leaflet Draw CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+    
+    <!-- Leaflet Heat CSS (for heatmap) -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Disclaimer Banner -->
+    <div class="disclaimer-banner">
+        ⚠️ <strong>Disclaimer:</strong> This is for educational purposes only. The API used belongs to Tunisie Telecom and is not public.
+    </div>
+
+    <div class="container-fluid h-100">
+        <div class="row h-100">
+            <!-- Sidebar Control Panel -->
+            <div class="col-lg-3 col-md-4 sidebar" id="sidebar">
+                <div class="sidebar-content">
+                    <h4 class="text-center mb-3">
+                        <img src="https://www.tunisietelecom.tn/Fr/PublishingImages/logo-tt.png" alt="TT Logo" style="height: 30px; margin-right: 10px;">
+                        Sfax Fiber Scanner
+                    </h4>
+                    
+                    <!-- Scan Configuration -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">Scan Configuration</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row mb-2">
+                                <div class="col-6">
+                                    <label class="form-label small">Lat Min</label>
+                                    <input type="number" class="form-control form-control-sm" id="latMin" value="34.70" step="0.01">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Lat Max</label>
+                                    <input type="number" class="form-control form-control-sm" id="latMax" value="34.78" step="0.01">
+                                </div>
+                            </div>
+                            <div class="row mb-2">
+                                <div class="col-6">
+                                    <label class="form-label small">Lng Min</label>
+                                    <input type="number" class="form-control form-control-sm" id="lngMin" value="10.72" step="0.01">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Lng Max</label>
+                                    <input type="number" class="form-control form-control-sm" id="lngMax" value="10.80" step="0.01">
+                                </div>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small">Step Size (degrees)</label>
+                                <input type="number" class="form-control form-control-sm" id="stepSize" value="0.002" step="0.001" min="0.001">
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small">Delay (ms)</label>
+                                <input type="number" class="form-control form-control-sm" id="delayMs" value="500" step="50" min="100">
+                            </div>
+                            <div class="alert alert-info small mb-0" role="alert">
+                                Total points: <strong id="totalPoints">0</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scan Controls -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">Scan Controls</h6>
+                        </div>
+                        <div class="card-body">
+                            <button class="btn btn-success btn-sm w-100 mb-2" id="startBtn">
+                                <i class="bi bi-play-fill"></i> Start Scan
+                            </button>
+                            <button class="btn btn-warning btn-sm w-100 mb-2" id="pauseBtn" disabled>
+                                <i class="bi bi-pause-fill"></i> Pause
+                            </button>
+                            <button class="btn btn-danger btn-sm w-100" id="stopBtn" disabled>
+                                <i class="bi bi-stop-fill"></i> Stop
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Progress -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">Progress</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="progress mb-2" style="height: 25px;">
+                                <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                            </div>
+                            <p class="small mb-0 text-center" id="progressText">Ready to scan</p>
+                        </div>
+                    </div>
+
+                    <!-- Statistics -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">Statistics</h6>
+                        </div>
+                        <div class="card-body">
+                            <table class="table table-sm table-borderless mb-0">
+                                <tr>
+                                    <td class="small">Total Scanned:</td>
+                                    <td class="text-end small"><strong id="statTotal">0</strong></td>
+                                </tr>
+                                <tr>
+                                    <td class="small">🟢 Fiber Available:</td>
+                                    <td class="text-end small"><strong id="statAvailable">0 (0%)</strong></td>
+                                </tr>
+                                <tr>
+                                    <td class="small">🔴 Not Available:</td>
+                                    <td class="text-end small"><strong id="statNotAvailable">0</strong></td>
+                                </tr>
+                                <tr>
+                                    <td class="small">🟡 Errors:</td>
+                                    <td class="text-end small"><strong id="statErrors">0</strong></td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Map Options -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">Map Options</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="showHeatmap">
+                                <label class="form-check-label small" for="showHeatmap">
+                                    Show Heatmap
+                                </label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="drawRectangle">
+                                <label class="form-check-label small" for="drawRectangle">
+                                    Draw Custom Bounds
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Export & Clear -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">Actions</h6>
+                        </div>
+                        <div class="card-body">
+                            <button class="btn btn-primary btn-sm w-100 mb-2" id="exportJsonBtn">
+                                Export JSON
+                            </button>
+                            <button class="btn btn-primary btn-sm w-100 mb-2" id="exportCsvBtn">
+                                Export CSV
+                            </button>
+                            <button class="btn btn-secondary btn-sm w-100 mb-2" id="loadPreviousBtn">
+                                Load Previous Results
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm w-100" id="clearBtn">
+                                Clear All
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Map Container -->
+            <div class="col-lg-9 col-md-8 map-container p-0">
+                <div id="map"></div>
+                
+                <!-- Map Legend -->
+                <div class="map-legend">
+                    <h6 class="mb-2">Legend</h6>
+                    <div class="legend-item">
+                        <span class="legend-color" style="background-color: #28a745;"></span>
+                        <span class="small">Fiber Available (GPON)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color" style="background-color: #dc3545;"></span>
+                        <span class="small">Fiber Not Available</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color" style="background-color: #ffc107;"></span>
+                        <span class="small">Error / Skipped</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Leaflet Draw JS -->
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    
+    <!-- Leaflet Heat JS -->
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    
+    <!-- Main Script -->
+    <script src="script.js"></script>
+</body>
+</html>
