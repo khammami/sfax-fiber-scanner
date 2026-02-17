@@ -7,9 +7,6 @@ let drawnItems;
 let scanResults = [];
 let scanRunning = false;
 let scanPaused = false;
-let currentToken = null;
-let tokenRequestCount = 0;
-const TOKEN_REFRESH_INTERVAL = 50; // Refresh token every 50 requests
 const RETRY_DELAY_MS = 1000; // Delay before retrying failed requests
 
 // Statistics
@@ -76,8 +73,15 @@ function codeCoordinates(x, y) {
 
 /**
  * Check fiber coverage for a specific coordinate
+ * Generates a fresh token for each request as required by the API
  */
-async function checkCoverage(lat, lng, token) {
+async function checkCoverage(lat, lng) {
+    // Generate fresh token for this request
+    const token = await getToken();
+    if (!token) {
+        throw new Error('Failed to generate token');
+    }
+    
     const coded = codeCoordinates(lng, lat);
     const payload = {
         TaghtiaRequest: {
@@ -352,16 +356,6 @@ async function startScan() {
     document.getElementById('stopBtn').disabled = false;
     document.getElementById('progressText').textContent = 'Initializing scan...';
 
-    // Generate token
-    currentToken = await getToken();
-    tokenRequestCount = 0;
-    
-    if (!currentToken) {
-        alert('Failed to generate token. Please try again.');
-        stopScan();
-        return;
-    }
-
     // Generate points
     const points = generateGridPoints();
     const total = points.length;
@@ -379,24 +373,17 @@ async function startScan() {
         if (!scanRunning) break;
 
         const point = points[i];
-        
-        // Refresh token if needed
-        tokenRequestCount++;
-        if (tokenRequestCount >= TOKEN_REFRESH_INTERVAL) {
-            currentToken = await getToken();
-            tokenRequestCount = 0;
-        }
 
-        // Check coverage
+        // Check coverage (token is generated inside checkCoverage for each request)
         let result = null;
         let isError = false;
         try {
-            result = await checkCoverage(point.lat, point.lng, currentToken);
+            result = await checkCoverage(point.lat, point.lng);
         } catch (error) {
-            // Retry once
+            // Retry once with a new token
             try {
                 await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-                result = await checkCoverage(point.lat, point.lng, currentToken);
+                result = await checkCoverage(point.lat, point.lng);
             } catch (retryError) {
                 console.error(`Failed to check coverage for ${point.lat}, ${point.lng}:`, retryError);
                 isError = true;

@@ -55,13 +55,13 @@ A standalone web application that systematically scans the Sfax, Tunisia region 
 
 ### Token Generation
 
-The Tunisie Telecom API requires a special token for authentication:
+The Tunisie Telecom API requires a unique token for each request:
 
 1. Fetch server time from `getAppVersion` endpoint
 2. Extract and decode the timestamp
 3. Calculate token value using specific offsets
 4. Append a 10-character random string
-5. Token is refreshed every 50 requests to avoid expiration
+5. **Each API request generates its own fresh token**
 
 ```javascript
 async function getToken() {
@@ -69,6 +69,12 @@ async function getToken() {
     const data = await response.json();
     // ... token calculation logic
     return token;
+}
+
+async function checkCoverage(lat, lng) {
+    // Generate fresh token for this specific request
+    const token = await getToken();
+    // ... make API call with token
 }
 ```
 
