@@ -337,7 +337,29 @@ function updateStats() {
 }
 
 /**
- * Main scan function
+ * Process a single point: check coverage with retry
+ * Returns { point, result, isError }
+ */
+async function processPoint(point) {
+    let result = null;
+    let isError = false;
+    try {
+        result = await checkCoverage(point.lat, point.lng);
+    } catch (error) {
+        // Retry once with a new token
+        try {
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+            result = await checkCoverage(point.lat, point.lng);
+        } catch (retryError) {
+            console.error(`Failed to check coverage for ${point.lat}, ${point.lng}:`, retryError);
+            isError = true;
+        }
+    }
+    return { point, result, isError };
+}
+
+/**
+ * Main scan function - processes points in parallel batches
  */
 async function startScan() {
     if (scanRunning) return;
@@ -356,13 +378,18 @@ async function startScan() {
     document.getElementById('pauseBtn').disabled = false;
     document.getElementById('stopBtn').disabled = false;
     document.getElementById('progressText').textContent = 'Initializing scan...';
+    document.getElementById('speedText').textContent = '';
 
     // Generate points
     const points = generateGridPoints();
     const total = points.length;
     const delay = parseInt(document.getElementById('delayMs').value);
+    const concurrency = parseInt(document.getElementById('concurrency').value) || 5;
 
-    for (let i = 0; i < points.length; i++) {
+    const scanStartTime = Date.now();
+    let processed = 0;
+
+    for (let i = 0; i < points.length; i += concurrency) {
         // Check if scan should stop
         if (!scanRunning) break;
 
@@ -373,49 +400,67 @@ async function startScan() {
 
         if (!scanRunning) break;
 
-        const point = points[i];
+        // Create a batch of concurrent requests
+        const batch = points.slice(i, Math.min(i + concurrency, points.length));
+        const promises = batch.map(point => processPoint(point));
+        const results = await Promise.allSettled(promises);
 
-        // Check coverage (token is generated inside checkCoverage for each request)
-        let result = null;
-        let isError = false;
-        try {
-            result = await checkCoverage(point.lat, point.lng);
-        } catch (error) {
-            // Retry once with a new token
-            try {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-                result = await checkCoverage(point.lat, point.lng);
-            } catch (retryError) {
-                console.error(`Failed to check coverage for ${point.lat}, ${point.lng}:`, retryError);
-                isError = true;
+        // Process batch results
+        for (const settled of results) {
+            if (!scanRunning) break;
+
+            const { point, result, isError } = settled.status === 'fulfilled' 
+                ? settled.value 
+                : { point: null, result: null, isError: true };
+
+            if (!point) continue;
+
+            if (isError) {
                 stats.errors++;
             }
-        }
 
-        // Add marker and update results
-        const markerData = addMarker(point.lat, point.lng, result, isError);
-        scanResults.push({ ...markerData, isError });
+            // Add marker and update results
+            const markerData = addMarker(point.lat, point.lng, result, isError);
+            scanResults.push({ ...markerData, isError });
 
-        // Update statistics
-        if (!isError) {
-            stats.total++;
-            if (markerData.available) {
-                stats.available++;
-            } else {
-                stats.notAvailable++;
+            // Update statistics
+            if (!isError) {
+                stats.total++;
+                if (markerData.available) {
+                    stats.available++;
+                } else {
+                    stats.notAvailable++;
+                }
             }
         }
 
+        processed = Math.min(i + batch.length, points.length);
         updateStats();
-        updateProgress(i + 1, total);
+        updateProgress(processed, total);
 
-        // Delay before next request
-        await new Promise(resolve => setTimeout(resolve, delay));
+        // Update speed display
+        const elapsedSec = (Date.now() - scanStartTime) / 1000;
+        if (elapsedSec > 0) {
+            const speed = (processed / elapsedSec).toFixed(1);
+            const remaining = total - processed;
+            const eta = remaining > 0 ? Math.round(remaining / (processed / elapsedSec)) : 0;
+            const etaMin = Math.floor(eta / 60);
+            const etaSec = eta % 60;
+            document.getElementById('speedText').textContent = 
+                `⚡ ${speed} pts/sec | ETA: ${etaMin}m ${etaSec}s`;
+        }
+
+        // Delay before next batch
+        if (delay > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
     }
 
     // Scan complete
     if (scanRunning) {
-        document.getElementById('progressText').textContent = `Scan complete! ${stats.total} points scanned.`;
+        const totalTime = ((Date.now() - scanStartTime) / 1000).toFixed(1);
+        document.getElementById('progressText').textContent = `Scan complete! ${stats.total} points scanned in ${totalTime}s.`;
+        document.getElementById('speedText').textContent = '';
         updateHeatmap();
         saveToLocalStorage();
     }
@@ -471,7 +516,7 @@ function stopScan() {
 }
 
 /**
- * Retry scanning for "Not Available" points
+ * Retry scanning for "Not Available" points - processes in parallel batches
  */
 async function retryNotAvailablePoints() {
     if (scanRunning) return;
@@ -497,13 +542,18 @@ async function retryNotAvailablePoints() {
     document.getElementById('stopBtn').disabled = false;
     document.getElementById('retryNotAvailableBtn').disabled = true;
     document.getElementById('progressText').textContent = 'Retrying Not Available points...';
+    document.getElementById('speedText').textContent = '';
     
     const total = notAvailablePoints.length;
     const delay = parseInt(document.getElementById('delayMs').value);
+    const concurrency = parseInt(document.getElementById('concurrency').value) || 5;
     let updatedCount = 0;
     let nowAvailableCount = 0;
+
+    const retryStartTime = Date.now();
+    let processed = 0;
     
-    for (let i = 0; i < notAvailablePoints.length; i++) {
+    for (let i = 0; i < notAvailablePoints.length; i += concurrency) {
         // Check if scan should stop
         if (!scanRunning) break;
         
@@ -513,80 +563,95 @@ async function retryNotAvailablePoints() {
         }
         
         if (!scanRunning) break;
-        
-        const point = notAvailablePoints[i];
-        
-        // Check coverage with fresh token
-        let result = null;
-        let isError = false;
-        try {
-            result = await checkCoverage(point.lat, point.lng);
-        } catch (error) {
-            // Retry once with a new token
-            try {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-                result = await checkCoverage(point.lat, point.lng);
-            } catch (retryError) {
-                console.error(`Failed to check coverage for ${point.lat}, ${point.lng}:`, retryError);
-                isError = true;
-            }
-        }
-        
-        // Find and remove old marker from map
-        markersLayer.eachLayer(layer => {
-            if (layer instanceof L.CircleMarker) {
-                const latlng = layer.getLatLng();
-                if (Math.abs(latlng.lat - point.lat) < COORDINATE_TOLERANCE && 
-                    Math.abs(latlng.lng - point.lng) < COORDINATE_TOLERANCE) {
-                    markersLayer.removeLayer(layer);
+
+        // Create a batch of concurrent requests
+        const batch = notAvailablePoints.slice(i, Math.min(i + concurrency, notAvailablePoints.length));
+        const promises = batch.map(point => processPoint(point));
+        const results = await Promise.allSettled(promises);
+
+        // Process batch results
+        for (const settled of results) {
+            if (!scanRunning) break;
+
+            const { point, result, isError } = settled.status === 'fulfilled' 
+                ? settled.value 
+                : { point: null, result: null, isError: true };
+
+            if (!point) continue;
+
+            // Find and remove old marker from map
+            markersLayer.eachLayer(layer => {
+                if (layer instanceof L.CircleMarker) {
+                    const latlng = layer.getLatLng();
+                    if (Math.abs(latlng.lat - point.lat) < COORDINATE_TOLERANCE && 
+                        Math.abs(latlng.lng - point.lng) < COORDINATE_TOLERANCE) {
+                        markersLayer.removeLayer(layer);
+                    }
                 }
+            });
+            
+            // Add new marker with updated result
+            const markerData = addMarker(point.lat, point.lng, result, isError);
+            
+            // Find and update the point in scanResults
+            const resultIndex = scanResults.findIndex(r => 
+                Math.abs(r.lat - point.lat) < COORDINATE_TOLERANCE && 
+                Math.abs(r.lng - point.lng) < COORDINATE_TOLERANCE
+            );
+            
+            if (resultIndex !== -1) {
+                const oldResult = scanResults[resultIndex];
+                
+                // Update statistics - remove old count (we know it was "Not Available")
+                if (!oldResult.isError && !oldResult.available) {
+                    stats.notAvailable--;
+                }
+                
+                // Update the result
+                scanResults[resultIndex] = { ...markerData, isError };
+                
+                // Update statistics - add new count based on new status
+                if (isError) {
+                    stats.errors++;
+                } else if (markerData.available) {
+                    stats.available++;
+                    nowAvailableCount++;
+                } else {
+                    stats.notAvailable++;
+                }
+                
+                updatedCount++;
             }
-        });
-        
-        // Add new marker with updated result
-        const markerData = addMarker(point.lat, point.lng, result, isError);
-        
-        // Find and update the point in scanResults
-        const resultIndex = scanResults.findIndex(r => 
-            Math.abs(r.lat - point.lat) < COORDINATE_TOLERANCE && 
-            Math.abs(r.lng - point.lng) < COORDINATE_TOLERANCE
-        );
-        
-        if (resultIndex !== -1) {
-            const oldResult = scanResults[resultIndex];
-            
-            // Update statistics - remove old count (we know it was "Not Available")
-            if (!oldResult.isError && !oldResult.available) {
-                stats.notAvailable--;
-            }
-            
-            // Update the result
-            scanResults[resultIndex] = { ...markerData, isError };
-            
-            // Update statistics - add new count based on new status
-            if (isError) {
-                stats.errors++;
-            } else if (markerData.available) {
-                stats.available++;
-                nowAvailableCount++;
-            } else {
-                stats.notAvailable++;
-            }
-            
-            updatedCount++;
+        }
+
+        processed = Math.min(i + batch.length, notAvailablePoints.length);
+        updateStats();
+        updateProgress(processed, total);
+
+        // Update speed display
+        const elapsedSec = (Date.now() - retryStartTime) / 1000;
+        if (elapsedSec > 0) {
+            const speed = (processed / elapsedSec).toFixed(1);
+            const remaining = total - processed;
+            const eta = remaining > 0 ? Math.round(remaining / (processed / elapsedSec)) : 0;
+            const etaMin = Math.floor(eta / 60);
+            const etaSec = eta % 60;
+            document.getElementById('speedText').textContent = 
+                `⚡ ${speed} pts/sec | ETA: ${etaMin}m ${etaSec}s`;
         }
         
-        updateStats();
-        updateProgress(i + 1, total);
-        
-        // Delay before next request
-        await new Promise(resolve => setTimeout(resolve, delay));
+        // Delay before next batch
+        if (delay > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
     }
     
     // Retry complete
     if (scanRunning) {
-        const message = `Retry complete! Updated ${updatedCount} points. ${nowAvailableCount} are now available.`;
+        const totalTime = ((Date.now() - retryStartTime) / 1000).toFixed(1);
+        const message = `Retry complete! Updated ${updatedCount} points in ${totalTime}s. ${nowAvailableCount} are now available.`;
         document.getElementById('progressText').textContent = message;
+        document.getElementById('speedText').textContent = '';
         updateHeatmap();
         saveToLocalStorage();
     }
