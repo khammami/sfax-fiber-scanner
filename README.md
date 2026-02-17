@@ -11,6 +11,7 @@ A standalone web application that systematically scans the Sfax, Tunisia region 
 - 🔍 **Fine Grid Scanning**: Configurable scan area and grid density (~200m between points)
 - 📊 **Real-time Visualization**: Circle markers with color coding (green=available, red=not available, yellow=error)
 - 📈 **Progress Tracking**: Live progress bar and statistics during scanning
+- 🔄 **Retry Not Available Points**: Re-scan points that were marked as "Not Available" to check if status has changed
 - 🔥 **Heatmap Layer**: Optional heatmap visualization of coverage data
 - 📥 **Export Results**: Download scan data as JSON or CSV
 - 💾 **Results Persistence**: Automatic saving to localStorage with restore on page load
@@ -50,6 +51,12 @@ A standalone web application that systematically scans the Sfax, Tunisia region 
    - Click "Export JSON" or "Export CSV" to download results
    - Results are automatically saved to browser localStorage
    - Reload the page to restore previous scan data
+
+7. **Retry Not Available Points**
+   - After completing a scan, click "🔄 Retry Not Available" to re-scan points marked as "Not Available"
+   - Useful for checking if fiber coverage has been deployed to previously unavailable locations
+   - The system will show how many points to retry and update statistics
+   - Updated markers will reflect the new status (may become available or remain unavailable)
 
 ## How It Works
 
