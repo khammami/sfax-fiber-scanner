@@ -73,24 +73,13 @@ function codeCoordinates(x, y) {
 // ===== API Functions =====
 
 /**
- * Fetch multiple unique tokens sequentially.
- * Each token requires its own getAppVersion call to ensure uniqueness.
- */
-async function getTokens(count) {
-    const tokens = [];
-    for (let i = 0; i < count; i++) {
-        tokens.push(await getToken());
-    }
-    return tokens;
-}
-
-/**
  * Check fiber coverage for a specific coordinate
- * If a pre-fetched token is provided, it will be used directly;
- * otherwise a fresh token is generated (for single/non-batch calls).
+ * Generates a fresh token for each request as required by the API.
+ * Requests must be made sequentially — the API returns faulty responses
+ * when multiple requests are sent concurrently.
  */
-async function checkCoverage(lat, lng, prefetchedToken) {
-    const token = prefetchedToken || await getToken();
+async function checkCoverage(lat, lng) {
+    const token = await getToken();
     if (!token) {
         throw new Error('Failed to generate token');
     }
@@ -350,14 +339,13 @@ function updateStats() {
 
 /**
  * Process a single point: check coverage with retry
- * Accepts a pre-fetched token to ensure each parallel request uses its own unique token.
  * Returns { point, result, isError }
  */
-async function processPoint(point, token) {
+async function processPoint(point) {
     let result = null;
     let isError = false;
     try {
-        result = await checkCoverage(point.lat, point.lng, token);
+        result = await checkCoverage(point.lat, point.lng);
     } catch (error) {
         // Retry once with a new token
         try {
@@ -372,7 +360,9 @@ async function processPoint(point, token) {
 }
 
 /**
- * Main scan function - processes points in parallel batches
+ * Main scan function - processes points sequentially (one at a time).
+ * The API returns faulty responses when hit with concurrent requests,
+ * so each request must complete before the next one starts.
  */
 async function startScan() {
     if (scanRunning) return;
@@ -397,12 +387,10 @@ async function startScan() {
     const points = generateGridPoints();
     const total = points.length;
     const delay = parseInt(document.getElementById('delayMs').value);
-    const concurrency = parseInt(document.getElementById('concurrency').value) || 5;
 
     const scanStartTime = Date.now();
-    let processed = 0;
 
-    for (let i = 0; i < points.length; i += concurrency) {
+    for (let i = 0; i < points.length; i++) {
         // Check if scan should stop
         if (!scanRunning) break;
 
@@ -413,60 +401,42 @@ async function startScan() {
 
         if (!scanRunning) break;
 
-        // Pre-fetch unique tokens for each point in the batch (sequentially to ensure uniqueness)
-        const batch = points.slice(i, Math.min(i + concurrency, points.length));
-        const tokens = await getTokens(batch.length);
+        const { point, result, isError } = await processPoint(points[i]);
 
-        // Fire all coverage requests in parallel, each with its own pre-fetched token
-        const promises = batch.map((point, idx) => processPoint(point, tokens[idx]));
-        const results = await Promise.allSettled(promises);
+        if (isError) {
+            stats.errors++;
+        }
 
-        // Process batch results
-        for (const settled of results) {
-            if (!scanRunning) break;
+        // Add marker and update results
+        const markerData = addMarker(point.lat, point.lng, result, isError);
+        scanResults.push({ ...markerData, isError });
 
-            const { point, result, isError } = settled.status === 'fulfilled' 
-                ? settled.value 
-                : { point: null, result: null, isError: true };
-
-            if (!point) continue;
-
-            if (isError) {
-                stats.errors++;
-            }
-
-            // Add marker and update results
-            const markerData = addMarker(point.lat, point.lng, result, isError);
-            scanResults.push({ ...markerData, isError });
-
-            // Update statistics
-            if (!isError) {
-                stats.total++;
-                if (markerData.available) {
-                    stats.available++;
-                } else {
-                    stats.notAvailable++;
-                }
+        // Update statistics
+        if (!isError) {
+            stats.total++;
+            if (markerData.available) {
+                stats.available++;
+            } else {
+                stats.notAvailable++;
             }
         }
 
-        processed = Math.min(i + batch.length, points.length);
         updateStats();
-        updateProgress(processed, total);
+        updateProgress(i + 1, total);
 
         // Update speed display
         const elapsedSec = (Date.now() - scanStartTime) / 1000;
         if (elapsedSec > 0) {
-            const speed = (processed / elapsedSec).toFixed(1);
-            const remaining = total - processed;
-            const eta = remaining > 0 ? Math.round(remaining / (processed / elapsedSec)) : 0;
+            const speed = ((i + 1) / elapsedSec).toFixed(1);
+            const remaining = total - (i + 1);
+            const eta = remaining > 0 ? Math.round(remaining / ((i + 1) / elapsedSec)) : 0;
             const etaMin = Math.floor(eta / 60);
             const etaSec = eta % 60;
             document.getElementById('speedText').textContent = 
                 `⚡ ${speed} pts/sec | ETA: ${etaMin}m ${etaSec}s`;
         }
 
-        // Delay before next batch
+        // Delay before next request
         if (delay > 0) {
             await new Promise(resolve => setTimeout(resolve, delay));
         }
@@ -532,7 +502,7 @@ function stopScan() {
 }
 
 /**
- * Retry scanning for "Not Available" points - processes in parallel batches
+ * Retry scanning for "Not Available" points - processes sequentially
  */
 async function retryNotAvailablePoints() {
     if (scanRunning) return;
@@ -562,14 +532,12 @@ async function retryNotAvailablePoints() {
     
     const total = notAvailablePoints.length;
     const delay = parseInt(document.getElementById('delayMs').value);
-    const concurrency = parseInt(document.getElementById('concurrency').value) || 5;
     let updatedCount = 0;
     let nowAvailableCount = 0;
 
     const retryStartTime = Date.now();
-    let processed = 0;
     
-    for (let i = 0; i < notAvailablePoints.length; i += concurrency) {
+    for (let i = 0; i < notAvailablePoints.length; i++) {
         // Check if scan should stop
         if (!scanRunning) break;
         
@@ -580,86 +548,69 @@ async function retryNotAvailablePoints() {
         
         if (!scanRunning) break;
 
-        // Pre-fetch unique tokens for each point in the batch (sequentially to ensure uniqueness)
-        const batch = notAvailablePoints.slice(i, Math.min(i + concurrency, notAvailablePoints.length));
-        const tokens = await getTokens(batch.length);
+        const pointData = notAvailablePoints[i];
+        const { point, result, isError } = await processPoint(pointData);
 
-        // Fire all coverage requests in parallel, each with its own pre-fetched token
-        const promises = batch.map((point, idx) => processPoint(point, tokens[idx]));
-        const results = await Promise.allSettled(promises);
-
-        // Process batch results
-        for (const settled of results) {
-            if (!scanRunning) break;
-
-            const { point, result, isError } = settled.status === 'fulfilled' 
-                ? settled.value 
-                : { point: null, result: null, isError: true };
-
-            if (!point) continue;
-
-            // Find and remove old marker from map
-            markersLayer.eachLayer(layer => {
-                if (layer instanceof L.CircleMarker) {
-                    const latlng = layer.getLatLng();
-                    if (Math.abs(latlng.lat - point.lat) < COORDINATE_TOLERANCE && 
-                        Math.abs(latlng.lng - point.lng) < COORDINATE_TOLERANCE) {
-                        markersLayer.removeLayer(layer);
-                    }
+        // Find and remove old marker from map
+        markersLayer.eachLayer(layer => {
+            if (layer instanceof L.CircleMarker) {
+                const latlng = layer.getLatLng();
+                if (Math.abs(latlng.lat - point.lat) < COORDINATE_TOLERANCE && 
+                    Math.abs(latlng.lng - point.lng) < COORDINATE_TOLERANCE) {
+                    markersLayer.removeLayer(layer);
                 }
-            });
-            
-            // Add new marker with updated result
-            const markerData = addMarker(point.lat, point.lng, result, isError);
-            
-            // Find and update the point in scanResults
-            const resultIndex = scanResults.findIndex(r => 
-                Math.abs(r.lat - point.lat) < COORDINATE_TOLERANCE && 
-                Math.abs(r.lng - point.lng) < COORDINATE_TOLERANCE
-            );
-            
-            if (resultIndex !== -1) {
-                const oldResult = scanResults[resultIndex];
-                
-                // Update statistics - remove old count (we know it was "Not Available")
-                if (!oldResult.isError && !oldResult.available) {
-                    stats.notAvailable--;
-                }
-                
-                // Update the result
-                scanResults[resultIndex] = { ...markerData, isError };
-                
-                // Update statistics - add new count based on new status
-                if (isError) {
-                    stats.errors++;
-                } else if (markerData.available) {
-                    stats.available++;
-                    nowAvailableCount++;
-                } else {
-                    stats.notAvailable++;
-                }
-                
-                updatedCount++;
             }
+        });
+        
+        // Add new marker with updated result
+        const markerData = addMarker(point.lat, point.lng, result, isError);
+        
+        // Find and update the point in scanResults
+        const resultIndex = scanResults.findIndex(r => 
+            Math.abs(r.lat - point.lat) < COORDINATE_TOLERANCE && 
+            Math.abs(r.lng - point.lng) < COORDINATE_TOLERANCE
+        );
+        
+        if (resultIndex !== -1) {
+            const oldResult = scanResults[resultIndex];
+            
+            // Update statistics - remove old count (we know it was "Not Available")
+            if (!oldResult.isError && !oldResult.available) {
+                stats.notAvailable--;
+            }
+            
+            // Update the result
+            scanResults[resultIndex] = { ...markerData, isError };
+            
+            // Update statistics - add new count based on new status
+            if (isError) {
+                stats.errors++;
+            } else if (markerData.available) {
+                stats.available++;
+                nowAvailableCount++;
+            } else {
+                stats.notAvailable++;
+            }
+            
+            updatedCount++;
         }
 
-        processed = Math.min(i + batch.length, notAvailablePoints.length);
         updateStats();
-        updateProgress(processed, total);
+        updateProgress(i + 1, total);
 
         // Update speed display
         const elapsedSec = (Date.now() - retryStartTime) / 1000;
         if (elapsedSec > 0) {
-            const speed = (processed / elapsedSec).toFixed(1);
-            const remaining = total - processed;
-            const eta = remaining > 0 ? Math.round(remaining / (processed / elapsedSec)) : 0;
+            const speed = ((i + 1) / elapsedSec).toFixed(1);
+            const remaining = total - (i + 1);
+            const eta = remaining > 0 ? Math.round(remaining / ((i + 1) / elapsedSec)) : 0;
             const etaMin = Math.floor(eta / 60);
             const etaSec = eta % 60;
             document.getElementById('speedText').textContent = 
                 `⚡ ${speed} pts/sec | ETA: ${etaMin}m ${etaSec}s`;
         }
         
-        // Delay before next batch
+        // Delay before next request
         if (delay > 0) {
             await new Promise(resolve => setTimeout(resolve, delay));
         }
