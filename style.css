@@ -1,0 +1,344 @@
+/* General Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+}
+
+/* Tunisie Telecom Blue */
+:root {
+    --tt-blue: #00426b;
+    --tt-light-blue: #0066a1;
+    --sidebar-bg: #f8f9fa;
+}
+
+/* Disclaimer Banner */
+.disclaimer-banner {
+    background-color: #fff3cd;
+    color: #856404;
+    padding: 10px;
+    text-align: center;
+    font-size: 14px;
+    border-bottom: 1px solid #ffeaa7;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 2000;
+}
+
+/* Container */
+.container-fluid {
+    padding-top: 45px;
+    height: 100vh;
+}
+
+.row {
+    height: 100%;
+    margin: 0;
+}
+
+/* Sidebar */
+.sidebar {
+    background-color: var(--sidebar-bg);
+    padding: 20px;
+    height: 100%;
+    overflow-y: auto;
+    border-right: 2px solid var(--tt-blue);
+}
+
+.sidebar-content {
+    max-width: 100%;
+}
+
+/* Card Styling */
+.card {
+    border: 1px solid #dee2e6;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.card-header {
+    background-color: var(--tt-blue);
+    color: white;
+    padding: 10px 15px;
+}
+
+.card-header h6 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.card-body {
+    padding: 15px;
+}
+
+/* Buttons */
+.btn {
+    border-radius: 5px;
+    font-weight: 500;
+}
+
+.btn-success {
+    background-color: #28a745;
+    border-color: #28a745;
+}
+
+.btn-success:hover {
+    background-color: #218838;
+    border-color: #1e7e34;
+}
+
+.btn-warning {
+    background-color: #ffc107;
+    border-color: #ffc107;
+    color: #000;
+}
+
+.btn-warning:hover {
+    background-color: #e0a800;
+    border-color: #d39e00;
+}
+
+.btn-danger {
+    background-color: #dc3545;
+    border-color: #dc3545;
+}
+
+.btn-danger:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+}
+
+.btn-primary {
+    background-color: var(--tt-blue);
+    border-color: var(--tt-blue);
+}
+
+.btn-primary:hover {
+    background-color: var(--tt-light-blue);
+    border-color: var(--tt-light-blue);
+}
+
+/* Map Container */
+.map-container {
+    height: 100%;
+    position: relative;
+}
+
+#map {
+    height: 100%;
+    width: 100%;
+}
+
+/* Map Legend */
+.map-legend {
+    position: absolute;
+    bottom: 30px;
+    right: 10px;
+    background-color: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    z-index: 1000;
+    min-width: 200px;
+}
+
+.map-legend h6 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: var(--tt-blue);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.legend-item:last-child {
+    margin-bottom: 0;
+}
+
+.legend-color {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    margin-right: 10px;
+    opacity: 0.7;
+    border: 1px solid #ccc;
+}
+
+/* Progress Bar */
+.progress {
+    background-color: #e9ecef;
+}
+
+.progress-bar {
+    background-color: var(--tt-blue);
+    font-size: 14px;
+    font-weight: 600;
+    transition: width 0.3s ease;
+}
+
+/* Form Inputs */
+.form-control-sm {
+    font-size: 13px;
+}
+
+.form-label {
+    font-weight: 500;
+    margin-bottom: 5px;
+}
+
+/* Alert */
+.alert-info {
+    background-color: #d1ecf1;
+    border-color: #bee5eb;
+    color: #0c5460;
+}
+
+/* Table */
+.table td {
+    padding: 5px 0;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .sidebar {
+        position: absolute;
+        left: -100%;
+        width: 100%;
+        height: calc(100% - 45px);
+        top: 45px;
+        z-index: 1500;
+        transition: left 0.3s ease;
+        border-right: none;
+        box-shadow: 2px 0 8px rgba(0,0,0,0.2);
+    }
+
+    .sidebar.show {
+        left: 0;
+    }
+
+    .map-container {
+        width: 100%;
+    }
+
+    .map-legend {
+        bottom: 10px;
+        right: 10px;
+        font-size: 12px;
+        padding: 10px;
+        min-width: 150px;
+    }
+
+    .map-legend h6 {
+        font-size: 12px;
+        margin-bottom: 5px;
+    }
+
+    .legend-color {
+        width: 15px;
+        height: 15px;
+        margin-right: 8px;
+    }
+
+    .legend-item {
+        margin-bottom: 5px;
+    }
+}
+
+/* Mobile Toggle Button */
+.mobile-toggle {
+    display: none;
+    position: absolute;
+    top: 55px;
+    left: 10px;
+    z-index: 1600;
+    background-color: white;
+    border: 2px solid var(--tt-blue);
+    border-radius: 5px;
+    padding: 8px 12px;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+@media (max-width: 768px) {
+    .mobile-toggle {
+        display: block;
+    }
+}
+
+/* Leaflet Popup Customization */
+.leaflet-popup-content {
+    margin: 10px;
+    font-size: 13px;
+}
+
+.leaflet-popup-content h6 {
+    margin-bottom: 8px;
+    color: var(--tt-blue);
+    font-size: 14px;
+}
+
+.leaflet-popup-content p {
+    margin: 5px 0;
+}
+
+.leaflet-popup-content strong {
+    color: var(--tt-blue);
+}
+
+/* Scrollbar Styling for Sidebar */
+.sidebar::-webkit-scrollbar {
+    width: 8px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: var(--tt-blue);
+    border-radius: 4px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: var(--tt-light-blue);
+}
+
+/* Loading Spinner */
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,.3);
+    border-radius: 50%;
+    border-top-color: white;
+    animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Custom Leaflet Draw Styles */
+.leaflet-draw-toolbar a {
+    background-color: white;
+}
+
+/* Disable text selection during scan */
+.no-select {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
