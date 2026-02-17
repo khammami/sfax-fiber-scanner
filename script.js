@@ -10,6 +10,7 @@ let scanPaused = false;
 let currentToken = null;
 let tokenRequestCount = 0;
 const TOKEN_REFRESH_INTERVAL = 50; // Refresh token every 50 requests
+const RETRY_DELAY_MS = 1000; // Delay before retrying failed requests
 
 // Statistics
 let stats = {
@@ -23,10 +24,11 @@ let stats = {
 
 /**
  * Generate a random string of 10 characters
+ * Character set matches the API's expected format (reverse-engineered from Tunisie Telecom API)
  */
 function makeRString() {
     let text = "";
-    const possible = "ABCxyz0123456789";
+    const possible = "ABCxyz0123456789"; // Specific charset required by the API
     for (let i = 0; i < 10; i++) {
         text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
@@ -393,7 +395,7 @@ async function startScan() {
         } catch (error) {
             // Retry once
             try {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
                 result = await checkCoverage(point.lat, point.lng, currentToken);
             } catch (retryError) {
                 console.error(`Failed to check coverage for ${point.lat}, ${point.lng}:`, retryError);
