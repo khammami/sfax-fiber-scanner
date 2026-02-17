@@ -469,6 +469,135 @@ function stopScan() {
     }
 }
 
+/**
+ * Retry scanning for "Not Available" points
+ */
+async function retryNotAvailablePoints() {
+    if (scanRunning) return;
+    
+    // Filter to get only "Not Available" points (not errors, just fiber not available)
+    const notAvailablePoints = scanResults.filter(r => !r.isError && !r.available);
+    
+    if (notAvailablePoints.length === 0) {
+        alert('No "Not Available" points to retry.');
+        return;
+    }
+    
+    const confirmRetry = confirm(`Found ${notAvailablePoints.length} "Not Available" points. Retry scanning these points?`);
+    if (!confirmRetry) return;
+    
+    // Set scan as running
+    scanRunning = true;
+    scanPaused = false;
+    
+    // Update UI
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('pauseBtn').disabled = false;
+    document.getElementById('stopBtn').disabled = false;
+    document.getElementById('retryNotAvailableBtn').disabled = true;
+    document.getElementById('progressText').textContent = 'Retrying Not Available points...';
+    
+    const total = notAvailablePoints.length;
+    const delay = parseInt(document.getElementById('delayMs').value);
+    let updatedCount = 0;
+    let nowAvailableCount = 0;
+    
+    for (let i = 0; i < notAvailablePoints.length; i++) {
+        // Check if scan should stop
+        if (!scanRunning) break;
+        
+        // Check if scan is paused
+        while (scanPaused && scanRunning) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        if (!scanRunning) break;
+        
+        const point = notAvailablePoints[i];
+        
+        // Check coverage with fresh token
+        let result = null;
+        let isError = false;
+        try {
+            result = await checkCoverage(point.lat, point.lng);
+        } catch (error) {
+            // Retry once with a new token
+            try {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                result = await checkCoverage(point.lat, point.lng);
+            } catch (retryError) {
+                console.error(`Failed to check coverage for ${point.lat}, ${point.lng}:`, retryError);
+                isError = true;
+            }
+        }
+        
+        // Find and remove old marker from map
+        markersLayer.eachLayer(layer => {
+            if (layer instanceof L.CircleMarker) {
+                const latlng = layer.getLatLng();
+                if (Math.abs(latlng.lat - point.lat) < 0.00001 && 
+                    Math.abs(latlng.lng - point.lng) < 0.00001) {
+                    markersLayer.removeLayer(layer);
+                }
+            }
+        });
+        
+        // Add new marker with updated result
+        const markerData = addMarker(point.lat, point.lng, result, isError);
+        
+        // Find and update the point in scanResults
+        const resultIndex = scanResults.findIndex(r => 
+            Math.abs(r.lat - point.lat) < 0.00001 && 
+            Math.abs(r.lng - point.lng) < 0.00001
+        );
+        
+        if (resultIndex !== -1) {
+            // Update statistics - remove old count
+            if (!scanResults[resultIndex].isError) {
+                stats.notAvailable--;
+            }
+            
+            // Update the result
+            scanResults[resultIndex] = { ...markerData, isError };
+            
+            // Update statistics - add new count
+            if (!isError) {
+                if (markerData.available) {
+                    stats.available++;
+                    nowAvailableCount++;
+                } else {
+                    stats.notAvailable++;
+                }
+            } else {
+                stats.errors++;
+            }
+            
+            updatedCount++;
+        }
+        
+        updateStats();
+        updateProgress(i + 1, total);
+        
+        // Delay before next request
+        await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    
+    // Retry complete
+    if (scanRunning) {
+        const message = `Retry complete! Updated ${updatedCount} points. ${nowAvailableCount} are now available.`;
+        document.getElementById('progressText').textContent = message;
+        updateHeatmap();
+        saveToLocalStorage();
+    }
+    
+    // Reset UI
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('pauseBtn').disabled = true;
+    document.getElementById('stopBtn').disabled = true;
+    document.getElementById('retryNotAvailableBtn').disabled = false;
+    scanRunning = false;
+}
+
 // ===== Export Functions =====
 
 /**
@@ -643,6 +772,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('exportCsvBtn').addEventListener('click', exportCSV);
     
     // Other actions
+    document.getElementById('retryNotAvailableBtn').addEventListener('click', retryNotAvailablePoints);
     document.getElementById('loadPreviousBtn').addEventListener('click', loadFromLocalStorage);
     document.getElementById('clearBtn').addEventListener('click', clearAll);
     
