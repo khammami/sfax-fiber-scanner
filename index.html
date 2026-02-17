@@ -64,8 +64,12 @@
                                 <input type="number" class="form-control form-control-sm" id="stepSize" value="0.002" step="0.001" min="0.001">
                             </div>
                             <div class="mb-2">
-                                <label class="form-label small">Delay (ms)</label>
-                                <input type="number" class="form-control form-control-sm" id="delayMs" value="500" step="50" min="100">
+                                <label class="form-label small">Delay between batches (ms)</label>
+                                <input type="number" class="form-control form-control-sm" id="delayMs" value="500" step="50" min="0" title="Delay between each batch of parallel requests. Low values with high concurrency may cause rate limiting.">
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small">Concurrency (parallel requests)</label>
+                                <input type="number" class="form-control form-control-sm" id="concurrency" value="5" step="1" min="1" max="50" title="Number of API requests to send in parallel per batch.">
                             </div>
                             <div class="alert alert-info small mb-0" role="alert">
                                 Total points: <strong id="totalPoints">0</strong>
@@ -100,7 +104,8 @@
                             <div class="progress mb-2" style="height: 25px;">
                                 <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
                             </div>
-                            <p class="small mb-0 text-center" id="progressText">Ready to scan</p>
+                            <p class="small mb-1 text-center" id="progressText">Ready to scan</p>
+                            <p class="small mb-0 text-center text-muted" id="speedText"></p>
                         </div>
                     </div>
 
