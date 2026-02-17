@@ -8,6 +8,7 @@ let scanResults = [];
 let scanRunning = false;
 let scanPaused = false;
 const RETRY_DELAY_MS = 1000; // Delay before retrying failed requests
+const COORDINATE_TOLERANCE = 0.00001; // Tolerance for comparing coordinates
 
 // Statistics
 let stats = {
@@ -535,8 +536,8 @@ async function retryNotAvailablePoints() {
         markersLayer.eachLayer(layer => {
             if (layer instanceof L.CircleMarker) {
                 const latlng = layer.getLatLng();
-                if (Math.abs(latlng.lat - point.lat) < 0.00001 && 
-                    Math.abs(latlng.lng - point.lng) < 0.00001) {
+                if (Math.abs(latlng.lat - point.lat) < COORDINATE_TOLERANCE && 
+                    Math.abs(latlng.lng - point.lng) < COORDINATE_TOLERANCE) {
                     markersLayer.removeLayer(layer);
                 }
             }
@@ -547,29 +548,29 @@ async function retryNotAvailablePoints() {
         
         // Find and update the point in scanResults
         const resultIndex = scanResults.findIndex(r => 
-            Math.abs(r.lat - point.lat) < 0.00001 && 
-            Math.abs(r.lng - point.lng) < 0.00001
+            Math.abs(r.lat - point.lat) < COORDINATE_TOLERANCE && 
+            Math.abs(r.lng - point.lng) < COORDINATE_TOLERANCE
         );
         
         if (resultIndex !== -1) {
-            // Update statistics - remove old count
-            if (!scanResults[resultIndex].isError) {
+            const oldResult = scanResults[resultIndex];
+            
+            // Update statistics - remove old count (we know it was "Not Available")
+            if (!oldResult.isError && !oldResult.available) {
                 stats.notAvailable--;
             }
             
             // Update the result
             scanResults[resultIndex] = { ...markerData, isError };
             
-            // Update statistics - add new count
-            if (!isError) {
-                if (markerData.available) {
-                    stats.available++;
-                    nowAvailableCount++;
-                } else {
-                    stats.notAvailable++;
-                }
-            } else {
+            // Update statistics - add new count based on new status
+            if (isError) {
                 stats.errors++;
+            } else if (markerData.available) {
+                stats.available++;
+                nowAvailableCount++;
+            } else {
+                stats.notAvailable++;
             }
             
             updatedCount++;
