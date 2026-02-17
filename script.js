@@ -73,12 +73,24 @@ function codeCoordinates(x, y) {
 // ===== API Functions =====
 
 /**
- * Check fiber coverage for a specific coordinate
- * Generates a fresh token for each request as required by the API
+ * Fetch multiple unique tokens sequentially.
+ * Each token requires its own getAppVersion call to ensure uniqueness.
  */
-async function checkCoverage(lat, lng) {
-    // Generate fresh token for this request
-    const token = await getToken();
+async function getTokens(count) {
+    const tokens = [];
+    for (let i = 0; i < count; i++) {
+        tokens.push(await getToken());
+    }
+    return tokens;
+}
+
+/**
+ * Check fiber coverage for a specific coordinate
+ * If a pre-fetched token is provided, it will be used directly;
+ * otherwise a fresh token is generated (for single/non-batch calls).
+ */
+async function checkCoverage(lat, lng, prefetchedToken) {
+    const token = prefetchedToken || await getToken();
     if (!token) {
         throw new Error('Failed to generate token');
     }
@@ -338,13 +350,14 @@ function updateStats() {
 
 /**
  * Process a single point: check coverage with retry
+ * Accepts a pre-fetched token to ensure each parallel request uses its own unique token.
  * Returns { point, result, isError }
  */
-async function processPoint(point) {
+async function processPoint(point, token) {
     let result = null;
     let isError = false;
     try {
-        result = await checkCoverage(point.lat, point.lng);
+        result = await checkCoverage(point.lat, point.lng, token);
     } catch (error) {
         // Retry once with a new token
         try {
@@ -400,9 +413,12 @@ async function startScan() {
 
         if (!scanRunning) break;
 
-        // Create a batch of concurrent requests
+        // Pre-fetch unique tokens for each point in the batch (sequentially to ensure uniqueness)
         const batch = points.slice(i, Math.min(i + concurrency, points.length));
-        const promises = batch.map(point => processPoint(point));
+        const tokens = await getTokens(batch.length);
+
+        // Fire all coverage requests in parallel, each with its own pre-fetched token
+        const promises = batch.map((point, idx) => processPoint(point, tokens[idx]));
         const results = await Promise.allSettled(promises);
 
         // Process batch results
@@ -564,9 +580,12 @@ async function retryNotAvailablePoints() {
         
         if (!scanRunning) break;
 
-        // Create a batch of concurrent requests
+        // Pre-fetch unique tokens for each point in the batch (sequentially to ensure uniqueness)
         const batch = notAvailablePoints.slice(i, Math.min(i + concurrency, notAvailablePoints.length));
-        const promises = batch.map(point => processPoint(point));
+        const tokens = await getTokens(batch.length);
+
+        // Fire all coverage requests in parallel, each with its own pre-fetched token
+        const promises = batch.map((point, idx) => processPoint(point, tokens[idx]));
         const results = await Promise.allSettled(promises);
 
         // Process batch results
