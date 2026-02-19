@@ -13,7 +13,7 @@ const COORDINATE_TOLERANCE = 0.00001; // Tolerance for comparing coordinates
 // CORS proxy for GitHub Pages deployment (avoids cross-origin preflight failures)
 const API_BASE_URL = "https://geo.tunisietelecom.tn/rsm/RSMService.svc";
 const isLocalhost = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
-const CORS_PROXY = isLocalhost ? "" : "https://corsproxy.io/?";
+const CORS_PROXY = isLocalhost ? "" : "https://corsproxy.io/?url=";
 
 /**
  * Build API URL, routing through CORS proxy when not on localhost
