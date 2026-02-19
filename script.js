@@ -116,11 +116,32 @@ function initMap() {
     // Create map centered on Sfax
     map = L.map('map').setView([34.74, 10.76], 13);
 
-    // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // Define base tile layers
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
         maxZoom: 19
-    }).addTo(map);
+    });
+
+    const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '© Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+        maxZoom: 19
+    });
+
+    const topoMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenTopoMap contributors',
+        maxZoom: 17
+    });
+
+    // Add default layer
+    osm.addTo(map);
+
+    // Add layer control switcher
+    const baseLayers = {
+        'Street': osm,
+        'Satellite': satellite,
+        'Topographic': topoMap
+    };
+    L.control.layers(baseLayers, null, { position: 'topright' }).addTo(map);
 
     // Initialize marker layer
     markersLayer = L.layerGroup().addTo(map);
@@ -187,14 +208,14 @@ function addMarker(lat, lng, result, isError = false) {
         }
     }
 
-    // Create circle marker
+    // Create circle marker (low opacity so the underlying map remains visible)
     const marker = L.circleMarker([lat, lng], {
         radius: 6,
         fillColor: color,
         color: color,
         weight: 1,
-        opacity: 0.7,
-        fillOpacity: 0.5
+        opacity: 0.4,
+        fillOpacity: 0.25
     });
 
     // Create popup content
@@ -257,6 +278,7 @@ function updateHeatmap() {
         blur: 15,
         maxZoom: 17,
         max: 1.0,
+        minOpacity: 0.3, // Keep underlying map visible through the heatmap
         gradient: {
             0.0: '#dc3545',
             0.5: '#ffc107',
@@ -720,15 +742,15 @@ function loadFromLocalStorage() {
         scanResults = parsed.results || [];
         stats = parsed.statistics || { total: 0, available: 0, notAvailable: 0, errors: 0 };
         
-        // Restore markers
+        // Restore markers (low opacity so the underlying map remains visible)
         scanResults.forEach(result => {
             const marker = L.circleMarker([result.lat, result.lng], {
                 radius: 6,
                 fillColor: result.color,
                 color: result.color,
                 weight: 1,
-                opacity: 0.7,
-                fillOpacity: 0.5
+                opacity: 0.4,
+                fillOpacity: 0.25
             });
             
             let status = result.available ? 'Fiber Available (GPON)' : 
