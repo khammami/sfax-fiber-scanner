@@ -325,7 +325,9 @@ function calculateTotalPoints() {
 }
 
 /**
- * Generate grid points for scanning
+ * Generate grid points for scanning.
+ * Uses index-based calculation to avoid floating-point accumulation drift,
+ * ensuring the point count matches calculateTotalPoints().
  */
 function generateGridPoints() {
     const latMin = parseFloat(document.getElementById('latMin').value);
@@ -334,9 +336,14 @@ function generateGridPoints() {
     const lngMax = parseFloat(document.getElementById('lngMax').value);
     const step = parseFloat(document.getElementById('stepSize').value);
 
+    const latSteps = Math.ceil((latMax - latMin) / step) + 1;
+    const lngSteps = Math.ceil((lngMax - lngMin) / step) + 1;
+
     const points = [];
-    for (let lat = latMin; lat <= latMax; lat += step) {
-        for (let lng = lngMin; lng <= lngMax; lng += step) {
+    for (let i = 0; i < latSteps; i++) {
+        const lat = Math.min(latMin + i * step, latMax);
+        for (let j = 0; j < lngSteps; j++) {
+            const lng = Math.min(lngMin + j * step, lngMax);
             points.push({ lat: parseFloat(lat.toFixed(6)), lng: parseFloat(lng.toFixed(6)) });
         }
     }
