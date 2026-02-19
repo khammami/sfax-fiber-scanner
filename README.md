@@ -2,9 +2,6 @@
 
 A standalone web application that systematically scans the Sfax, Tunisia region to check fiber (GPON) coverage using the Tunisie Telecom API. The app displays results on an interactive map with comprehensive statistics and export capabilities.
 
-![Sfax Fiber Scanner](screenshot-placeholder.png)
-*Screenshot placeholder - The application displays fiber coverage results on an interactive map*
-
 ## Features
 
 - 🗺️ **Interactive Map**: Built with Leaflet.js and OpenStreetMap tiles
@@ -184,7 +181,7 @@ This project is inspired by and uses API information reverse-engineered from:
 
 MIT License
 
-Copyright (c) 2024
+Copyright (c) 2026
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
