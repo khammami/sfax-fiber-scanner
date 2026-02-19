@@ -10,6 +10,19 @@ let scanPaused = false;
 const RETRY_DELAY_MS = 1000; // Delay before retrying failed requests
 const COORDINATE_TOLERANCE = 0.00001; // Tolerance for comparing coordinates
 
+// CORS proxy for GitHub Pages deployment (avoids cross-origin preflight failures)
+const API_BASE_URL = "https://geo.tunisietelecom.tn/rsm/RSMService.svc";
+const isLocalhost = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
+const CORS_PROXY = isLocalhost ? "" : "https://corsproxy.io/?url=";
+
+/**
+ * Build API URL, routing through CORS proxy when not on localhost
+ */
+function apiUrl(endpoint) {
+    const url = API_BASE_URL + endpoint;
+    return CORS_PROXY ? CORS_PROXY + encodeURIComponent(url) : url;
+}
+
 // Statistics
 let stats = {
     total: 0,
@@ -38,7 +51,7 @@ function makeRString() {
  */
 async function getToken() {
     try {
-        const response = await fetch("https://geo.tunisietelecom.tn/rsm/RSMService.svc/getAppVersion");
+        const response = await fetch(apiUrl("/getAppVersion"));
         const data = await response.json();
         const r = data.getAppVersionResult;
         const WS1 = r;
@@ -94,7 +107,7 @@ async function checkCoverage(lat, lng) {
     };
 
     try {
-        const response = await fetch("https://geo.tunisietelecom.tn/rsm/RSMService.svc/TaghtiaUltimate", {
+        const response = await fetch(apiUrl("/TaghtiaUltimate"), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
