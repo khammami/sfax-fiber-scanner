@@ -307,6 +307,20 @@ function updateHeatmap() {
 // ===== Scan Functions =====
 
 /**
+ * Number of grid steps needed to cover a range.
+ * Uses epsilon-aware rounding so that floating-point noise
+ * (e.g. 3.0000000000001) doesn't add an extra step.
+ */
+function gridSteps(range, step) {
+    const raw = range / step;
+    const rounded = Math.round(raw);
+    if (Math.abs(raw - rounded) < 1e-9) {
+        return rounded;
+    }
+    return Math.ceil(raw);
+}
+
+/**
  * Calculate total number of points to scan
  */
 function calculateTotalPoints() {
@@ -316,8 +330,8 @@ function calculateTotalPoints() {
     const lngMax = parseFloat(document.getElementById('lngMax').value);
     const step = parseFloat(document.getElementById('stepSize').value);
 
-    const latSteps = Math.ceil((latMax - latMin) / step) + 1;
-    const lngSteps = Math.ceil((lngMax - lngMin) / step) + 1;
+    const latSteps = gridSteps(latMax - latMin, step) + 1;
+    const lngSteps = gridSteps(lngMax - lngMin, step) + 1;
     const total = latSteps * lngSteps;
 
     document.getElementById('totalPoints').textContent = total;
@@ -336,8 +350,8 @@ function generateGridPoints() {
     const lngMax = parseFloat(document.getElementById('lngMax').value);
     const step = parseFloat(document.getElementById('stepSize').value);
 
-    const latSteps = Math.ceil((latMax - latMin) / step) + 1;
-    const lngSteps = Math.ceil((lngMax - lngMin) / step) + 1;
+    const latSteps = gridSteps(latMax - latMin, step) + 1;
+    const lngSteps = gridSteps(lngMax - lngMin, step) + 1;
 
     const points = [];
     for (let i = 0; i < latSteps; i++) {
