@@ -13,7 +13,7 @@ const COORDINATE_TOLERANCE = 0.00001; // Tolerance for comparing coordinates
 // CORS proxy for GitHub Pages deployment (avoids cross-origin preflight failures)
 const API_BASE_URL = "https://geo.tunisietelecom.tn/rsm/RSMService.svc";
 const isLocalhost = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
-const CORS_PROXY = isLocalhost ? "" : "https://corsproxy.io/?url=";
+const CORS_PROXY = isLocalhost ? "" : "https://corsproxy.io/?";
 
 /**
  * Build API URL, routing through CORS proxy when not on localhost
@@ -436,24 +436,29 @@ async function startScan() {
 
         if (!scanRunning) break;
 
-        const { point, result, isError } = await processPoint(points[i]);
+        try {
+            const { point, result, isError } = await processPoint(points[i]);
 
-        if (isError) {
-            stats.errors++;
-        }
-
-        // Add marker and update results
-        const markerData = addMarker(point.lat, point.lng, result, isError);
-        scanResults.push({ ...markerData, isError });
-
-        // Update statistics
-        if (!isError) {
-            stats.total++;
-            if (markerData.available) {
-                stats.available++;
-            } else {
-                stats.notAvailable++;
+            if (isError) {
+                stats.errors++;
             }
+
+            // Add marker and update results
+            const markerData = addMarker(point.lat, point.lng, result, isError);
+            scanResults.push({ ...markerData, isError });
+
+            // Update statistics
+            if (!isError) {
+                stats.total++;
+                if (markerData.available) {
+                    stats.available++;
+                } else {
+                    stats.notAvailable++;
+                }
+            }
+        } catch (loopError) {
+            console.error(`Unexpected error processing point ${i}:`, loopError);
+            stats.errors++;
         }
 
         updateStats();
@@ -584,50 +589,55 @@ async function retryNotAvailablePoints() {
         if (!scanRunning) break;
 
         const pointData = notAvailablePoints[i];
-        const { point, result, isError } = await processPoint(pointData);
+        try {
+            const { point, result, isError } = await processPoint(pointData);
 
-        // Find and remove old marker from map
-        markersLayer.eachLayer(layer => {
-            if (layer instanceof L.CircleMarker) {
-                const latlng = layer.getLatLng();
-                if (Math.abs(latlng.lat - point.lat) < COORDINATE_TOLERANCE && 
-                    Math.abs(latlng.lng - point.lng) < COORDINATE_TOLERANCE) {
-                    markersLayer.removeLayer(layer);
+            // Find and remove old marker from map
+            markersLayer.eachLayer(layer => {
+                if (layer instanceof L.CircleMarker) {
+                    const latlng = layer.getLatLng();
+                    if (Math.abs(latlng.lat - point.lat) < COORDINATE_TOLERANCE && 
+                        Math.abs(latlng.lng - point.lng) < COORDINATE_TOLERANCE) {
+                        markersLayer.removeLayer(layer);
+                    }
                 }
+            });
+            
+            // Add new marker with updated result
+            const markerData = addMarker(point.lat, point.lng, result, isError);
+            
+            // Find and update the point in scanResults
+            const resultIndex = scanResults.findIndex(r => 
+                Math.abs(r.lat - point.lat) < COORDINATE_TOLERANCE && 
+                Math.abs(r.lng - point.lng) < COORDINATE_TOLERANCE
+            );
+            
+            if (resultIndex !== -1) {
+                const oldResult = scanResults[resultIndex];
+                
+                // Update statistics - remove old count (we know it was "Not Available")
+                if (!oldResult.isError && !oldResult.available) {
+                    stats.notAvailable--;
+                }
+                
+                // Update the result
+                scanResults[resultIndex] = { ...markerData, isError };
+                
+                // Update statistics - add new count based on new status
+                if (isError) {
+                    stats.errors++;
+                } else if (markerData.available) {
+                    stats.available++;
+                    nowAvailableCount++;
+                } else {
+                    stats.notAvailable++;
+                }
+                
+                updatedCount++;
             }
-        });
-        
-        // Add new marker with updated result
-        const markerData = addMarker(point.lat, point.lng, result, isError);
-        
-        // Find and update the point in scanResults
-        const resultIndex = scanResults.findIndex(r => 
-            Math.abs(r.lat - point.lat) < COORDINATE_TOLERANCE && 
-            Math.abs(r.lng - point.lng) < COORDINATE_TOLERANCE
-        );
-        
-        if (resultIndex !== -1) {
-            const oldResult = scanResults[resultIndex];
-            
-            // Update statistics - remove old count (we know it was "Not Available")
-            if (!oldResult.isError && !oldResult.available) {
-                stats.notAvailable--;
-            }
-            
-            // Update the result
-            scanResults[resultIndex] = { ...markerData, isError };
-            
-            // Update statistics - add new count based on new status
-            if (isError) {
-                stats.errors++;
-            } else if (markerData.available) {
-                stats.available++;
-                nowAvailableCount++;
-            } else {
-                stats.notAvailable++;
-            }
-            
-            updatedCount++;
+        } catch (loopError) {
+            console.error(`Unexpected error retrying point ${i}:`, loopError);
+            stats.errors++;
         }
 
         updateStats();
