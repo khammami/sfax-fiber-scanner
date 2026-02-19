@@ -10,6 +10,19 @@ let scanPaused = false;
 const RETRY_DELAY_MS = 1000; // Delay before retrying failed requests
 const COORDINATE_TOLERANCE = 0.00001; // Tolerance for comparing coordinates
 
+// CORS proxy for GitHub Pages deployment (avoids cross-origin preflight failures)
+const API_BASE_URL = "https://geo.tunisietelecom.tn/rsm/RSMService.svc";
+const isLocalhost = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
+const CORS_PROXY = isLocalhost ? "" : "https://corsproxy.io/?url=";
+
+/**
+ * Build API URL, routing through CORS proxy when not on localhost
+ */
+function apiUrl(endpoint) {
+    const url = API_BASE_URL + endpoint;
+    return CORS_PROXY ? CORS_PROXY + encodeURIComponent(url) : url;
+}
+
 // Statistics
 let stats = {
     total: 0,
@@ -38,7 +51,7 @@ function makeRString() {
  */
 async function getToken() {
     try {
-        const response = await fetch("https://geo.tunisietelecom.tn/rsm/RSMService.svc/getAppVersion");
+        const response = await fetch(apiUrl("/getAppVersion"));
         const data = await response.json();
         const r = data.getAppVersionResult;
         const WS1 = r;
@@ -94,7 +107,7 @@ async function checkCoverage(lat, lng) {
     };
 
     try {
-        const response = await fetch("https://geo.tunisietelecom.tn/rsm/RSMService.svc/TaghtiaUltimate", {
+        const response = await fetch(apiUrl("/TaghtiaUltimate"), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -294,6 +307,20 @@ function updateHeatmap() {
 // ===== Scan Functions =====
 
 /**
+ * Number of grid steps needed to cover a range.
+ * Uses epsilon-aware rounding so that floating-point noise
+ * (e.g. 3.0000000000001) doesn't add an extra step.
+ */
+function gridSteps(range, step) {
+    const raw = range / step;
+    const rounded = Math.round(raw);
+    if (Math.abs(raw - rounded) < 1e-9) {
+        return rounded;
+    }
+    return Math.ceil(raw);
+}
+
+/**
  * Calculate total number of points to scan
  */
 function calculateTotalPoints() {
@@ -303,8 +330,8 @@ function calculateTotalPoints() {
     const lngMax = parseFloat(document.getElementById('lngMax').value);
     const step = parseFloat(document.getElementById('stepSize').value);
 
-    const latSteps = Math.ceil((latMax - latMin) / step) + 1;
-    const lngSteps = Math.ceil((lngMax - lngMin) / step) + 1;
+    const latSteps = gridSteps(latMax - latMin, step) + 1;
+    const lngSteps = gridSteps(lngMax - lngMin, step) + 1;
     const total = latSteps * lngSteps;
 
     document.getElementById('totalPoints').textContent = total;
@@ -312,7 +339,9 @@ function calculateTotalPoints() {
 }
 
 /**
- * Generate grid points for scanning
+ * Generate grid points for scanning.
+ * Uses index-based calculation to avoid floating-point accumulation drift,
+ * ensuring the point count matches calculateTotalPoints().
  */
 function generateGridPoints() {
     const latMin = parseFloat(document.getElementById('latMin').value);
@@ -321,9 +350,14 @@ function generateGridPoints() {
     const lngMax = parseFloat(document.getElementById('lngMax').value);
     const step = parseFloat(document.getElementById('stepSize').value);
 
+    const latSteps = gridSteps(latMax - latMin, step) + 1;
+    const lngSteps = gridSteps(lngMax - lngMin, step) + 1;
+
     const points = [];
-    for (let lat = latMin; lat <= latMax; lat += step) {
-        for (let lng = lngMin; lng <= lngMax; lng += step) {
+    for (let i = 0; i < latSteps; i++) {
+        const lat = Math.min(latMin + i * step, latMax);
+        for (let j = 0; j < lngSteps; j++) {
+            const lng = Math.min(lngMin + j * step, lngMax);
             points.push({ lat: parseFloat(lat.toFixed(6)), lng: parseFloat(lng.toFixed(6)) });
         }
     }
@@ -423,24 +457,29 @@ async function startScan() {
 
         if (!scanRunning) break;
 
-        const { point, result, isError } = await processPoint(points[i]);
+        try {
+            const { point, result, isError } = await processPoint(points[i]);
 
-        if (isError) {
-            stats.errors++;
-        }
-
-        // Add marker and update results
-        const markerData = addMarker(point.lat, point.lng, result, isError);
-        scanResults.push({ ...markerData, isError });
-
-        // Update statistics
-        if (!isError) {
-            stats.total++;
-            if (markerData.available) {
-                stats.available++;
-            } else {
-                stats.notAvailable++;
+            if (isError) {
+                stats.errors++;
             }
+
+            // Add marker and update results
+            const markerData = addMarker(point.lat, point.lng, result, isError);
+            scanResults.push({ ...markerData, isError });
+
+            // Update statistics
+            if (!isError) {
+                stats.total++;
+                if (markerData.available) {
+                    stats.available++;
+                } else {
+                    stats.notAvailable++;
+                }
+            }
+        } catch (loopError) {
+            console.error(`Unexpected error processing point ${i}:`, loopError);
+            stats.errors++;
         }
 
         updateStats();
@@ -571,50 +610,55 @@ async function retryNotAvailablePoints() {
         if (!scanRunning) break;
 
         const pointData = notAvailablePoints[i];
-        const { point, result, isError } = await processPoint(pointData);
+        try {
+            const { point, result, isError } = await processPoint(pointData);
 
-        // Find and remove old marker from map
-        markersLayer.eachLayer(layer => {
-            if (layer instanceof L.CircleMarker) {
-                const latlng = layer.getLatLng();
-                if (Math.abs(latlng.lat - point.lat) < COORDINATE_TOLERANCE && 
-                    Math.abs(latlng.lng - point.lng) < COORDINATE_TOLERANCE) {
-                    markersLayer.removeLayer(layer);
+            // Find and remove old marker from map
+            markersLayer.eachLayer(layer => {
+                if (layer instanceof L.CircleMarker) {
+                    const latlng = layer.getLatLng();
+                    if (Math.abs(latlng.lat - point.lat) < COORDINATE_TOLERANCE && 
+                        Math.abs(latlng.lng - point.lng) < COORDINATE_TOLERANCE) {
+                        markersLayer.removeLayer(layer);
+                    }
                 }
+            });
+            
+            // Add new marker with updated result
+            const markerData = addMarker(point.lat, point.lng, result, isError);
+            
+            // Find and update the point in scanResults
+            const resultIndex = scanResults.findIndex(r => 
+                Math.abs(r.lat - point.lat) < COORDINATE_TOLERANCE && 
+                Math.abs(r.lng - point.lng) < COORDINATE_TOLERANCE
+            );
+            
+            if (resultIndex !== -1) {
+                const oldResult = scanResults[resultIndex];
+                
+                // Update statistics - remove old count (we know it was "Not Available")
+                if (!oldResult.isError && !oldResult.available) {
+                    stats.notAvailable--;
+                }
+                
+                // Update the result
+                scanResults[resultIndex] = { ...markerData, isError };
+                
+                // Update statistics - add new count based on new status
+                if (isError) {
+                    stats.errors++;
+                } else if (markerData.available) {
+                    stats.available++;
+                    nowAvailableCount++;
+                } else {
+                    stats.notAvailable++;
+                }
+                
+                updatedCount++;
             }
-        });
-        
-        // Add new marker with updated result
-        const markerData = addMarker(point.lat, point.lng, result, isError);
-        
-        // Find and update the point in scanResults
-        const resultIndex = scanResults.findIndex(r => 
-            Math.abs(r.lat - point.lat) < COORDINATE_TOLERANCE && 
-            Math.abs(r.lng - point.lng) < COORDINATE_TOLERANCE
-        );
-        
-        if (resultIndex !== -1) {
-            const oldResult = scanResults[resultIndex];
-            
-            // Update statistics - remove old count (we know it was "Not Available")
-            if (!oldResult.isError && !oldResult.available) {
-                stats.notAvailable--;
-            }
-            
-            // Update the result
-            scanResults[resultIndex] = { ...markerData, isError };
-            
-            // Update statistics - add new count based on new status
-            if (isError) {
-                stats.errors++;
-            } else if (markerData.available) {
-                stats.available++;
-                nowAvailableCount++;
-            } else {
-                stats.notAvailable++;
-            }
-            
-            updatedCount++;
+        } catch (loopError) {
+            console.error(`Unexpected error retrying point ${i}:`, loopError);
+            stats.errors++;
         }
 
         updateStats();
