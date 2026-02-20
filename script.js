@@ -10,6 +10,82 @@ let scanPaused = false;
 const RETRY_DELAY_MS = 1000; // Delay before retrying failed requests
 const COORDINATE_TOLERANCE = 0.00001; // Tolerance for comparing coordinates
 
+// ===== IndexedDB Cache Layer =====
+const DB_NAME = 'sfaxFiberScannerDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'scannedPoints';
+let dbInstance = null;
+
+function openDB() {
+    if (dbInstance) return Promise.resolve(dbInstance);
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME, { keyPath: 'key' });
+            }
+        };
+        request.onsuccess = (event) => {
+            dbInstance = event.target.result;
+            resolve(dbInstance);
+        };
+        request.onerror = (event) => reject(event.target.error);
+    });
+}
+
+async function getCachedPoint(key) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function putCachedPoint(record) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.put(record);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function getAllCachedPoints() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function clearCachedPoints() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.clear();
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+    });
+}
+
+/**
+ * Return the marker fill color for a given scan result state
+ */
+function markerColor(isError, available) {
+    if (isError) return '#ffc107';  // yellow for errors
+    return available ? '#28a745' : '#dc3545';  // green / red
+}
+
 // CORS proxy for GitHub Pages deployment (avoids cross-origin preflight failures)
 const API_BASE_URL = "https://geo.tunisietelecom.tn/rsm/RSMService.svc";
 const isLocalhost = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
@@ -29,7 +105,8 @@ let stats = {
     total: 0,
     available: 0,
     notAvailable: 0,
-    errors: 0
+    errors: 0,
+    cached: 0
 };
 
 // ===== Token Generation Functions =====
@@ -280,23 +357,20 @@ function updateHeatmap() {
         map.removeLayer(heatmapLayer);
     }
 
+    // Only show fiber-available points so the heatmap represents coverage
     const heatData = scanResults
-        .filter(r => !r.isError)
-        .map(r => {
-            const intensity = r.available ? 1.0 : 0.0;
-            return [r.lat, r.lng, intensity];
-        });
+        .filter(r => !r.isError && r.available)
+        .map(r => [r.lat, r.lng, 1.0]);
 
     heatmapLayer = L.heatLayer(heatData, {
         radius: 25,
         blur: 15,
         maxZoom: 17,
         max: 1.0,
-        minOpacity: 0.3, // Keep underlying map visible through the heatmap
+        minOpacity: 0.1,
         gradient: {
-            0.0: '#dc3545',
-            0.5: '#ffc107',
-            1.0: '#28a745'
+            0.4: '#28a745',
+            1.0: '#155724'
         }
     });
 
@@ -336,6 +410,7 @@ function calculateTotalPoints() {
     const total = latSteps * lngSteps;
 
     document.getElementById('totalPoints').textContent = total;
+    updateCoverageInfo();
     return total;
 }
 
@@ -366,6 +441,34 @@ function generateGridPoints() {
 }
 
 /**
+ * Show how many grid points are already in the IndexedDB cache
+ */
+async function updateCoverageInfo() {
+    const infoEl = document.getElementById('coverageInfo');
+    if (!infoEl) return;
+    try {
+        const points = generateGridPoints();
+        const total = points.length;
+        const allCached = await getAllCachedPoints();
+        const cachedKeys = new Set(
+            allCached.filter(r => !r.isError).map(r => r.key)
+        );
+        let cachedCount = 0;
+        for (const point of points) {
+            if (cachedKeys.has(`${point.lat},${point.lng}`)) cachedCount++;
+        }
+        if (cachedCount > 0) {
+            infoEl.textContent =
+                `💾 ${cachedCount} of ${total} already cached — ${total - cachedCount} new API calls needed`;
+        } else {
+            infoEl.textContent = '';
+        }
+    } catch (e) {
+        console.error('Error updating coverage info:', e);
+    }
+}
+
+/**
  * Update progress display
  */
 function updateProgress(current, total) {
@@ -392,6 +495,7 @@ function updateStats() {
     
     document.getElementById('statNotAvailable').textContent = stats.notAvailable;
     document.getElementById('statErrors').textContent = stats.errors;
+    document.getElementById('statCached').textContent = stats.cached;
 }
 
 /**
@@ -418,8 +522,7 @@ async function processPoint(point) {
 
 /**
  * Main scan function - processes points sequentially (one at a time).
- * The API returns faulty responses when hit with concurrent requests,
- * so each request must complete before the next one starts.
+ * Checks the IndexedDB cache first; skips API calls for already-cached points.
  */
 async function startScan() {
     if (scanRunning) return;
@@ -427,7 +530,7 @@ async function startScan() {
     // Reset state
     scanRunning = true;
     scanPaused = false;
-    stats = { total: 0, available: 0, notAvailable: 0, errors: 0 };
+    stats = { total: 0, available: 0, notAvailable: 0, errors: 0, cached: 0 };
     scanResults = [];
     
     // Clear markers
@@ -445,6 +548,15 @@ async function startScan() {
     const total = points.length;
     const delay = parseInt(document.getElementById('delayMs').value);
 
+    // Pre-fetch all cached points for fast O(1) lookup during the scan loop
+    let cachedPointsMap = new Map();
+    try {
+        const allCached = await getAllCachedPoints();
+        allCached.forEach(r => cachedPointsMap.set(r.key, r));
+    } catch (e) {
+        console.error('Error loading cache:', e);
+    }
+
     const scanStartTime = Date.now();
 
     for (let i = 0; i < points.length; i++) {
@@ -458,24 +570,58 @@ async function startScan() {
 
         if (!scanRunning) break;
 
+        const point = points[i];
+        const cacheKey = `${point.lat},${point.lng}`;
+        const cached = cachedPointsMap.get(cacheKey);
+
         try {
-            const { point, result, isError } = await processPoint(points[i]);
-
-            if (isError) {
-                stats.errors++;
-            }
-
-            // Add marker and update results
-            const markerData = addMarker(point.lat, point.lng, result, isError);
-            scanResults.push({ ...markerData, isError });
-
-            // Update statistics
-            if (!isError) {
+            if (cached && !cached.isError) {
+                // Use cached result — no API call needed
+                const markerData = addMarker(cached.lat, cached.lng, cached.result, false);
+                scanResults.push({ ...markerData, isError: false });
                 stats.total++;
-                if (markerData.available) {
+                stats.cached++;
+                if (cached.available) {
                     stats.available++;
                 } else {
                     stats.notAvailable++;
+                }
+            } else {
+                // Fresh API call
+                const { result, isError } = await processPoint(point);
+
+                if (isError) {
+                    stats.errors++;
+                }
+
+                // Add marker and update results
+                const markerData = addMarker(point.lat, point.lng, result, isError);
+                scanResults.push({ ...markerData, isError });
+
+                // Update statistics
+                if (!isError) {
+                    stats.total++;
+                    if (markerData.available) {
+                        stats.available++;
+                    } else {
+                        stats.notAvailable++;
+                    }
+                    // Save to IndexedDB cache (non-blocking)
+                    putCachedPoint({
+                        key: cacheKey,
+                        lat: point.lat,
+                        lng: point.lng,
+                        available: markerData.available,
+                        color: markerData.color,
+                        result,
+                        isError: false,
+                        timestamp: Date.now()
+                    }).catch(e => console.error('Error saving to cache:', e));
+                }
+
+                // Delay only for fresh API calls
+                if (delay > 0) {
+                    await new Promise(resolve => setTimeout(resolve, delay));
                 }
             }
         } catch (loopError) {
@@ -497,20 +643,17 @@ async function startScan() {
             document.getElementById('speedText').textContent = 
                 `⚡ ${speed} pts/sec | ETA: ${etaMin}m ${etaSec}s`;
         }
-
-        // Delay before next request
-        if (delay > 0) {
-            await new Promise(resolve => setTimeout(resolve, delay));
-        }
     }
 
     // Scan complete
     if (scanRunning) {
         const totalTime = ((Date.now() - scanStartTime) / 1000).toFixed(1);
-        document.getElementById('progressText').textContent = `Scan complete! ${stats.total} points scanned in ${totalTime}s.`;
+        const freshCount = stats.total - stats.cached;
+        document.getElementById('progressText').textContent =
+            `Scan complete! ${stats.total} points in ${totalTime}s (${stats.cached} cached, ${freshCount} fresh).`;
         document.getElementById('speedText').textContent = '';
         updateHeatmap();
-        saveToLocalStorage();
+        updateCoverageInfo();
     }
 
     // Reset UI
@@ -559,7 +702,6 @@ function stopScan() {
     
     if (scanResults.length > 0) {
         updateHeatmap();
-        saveToLocalStorage();
     }
 }
 
@@ -656,6 +798,20 @@ async function retryNotAvailablePoints() {
                 }
                 
                 updatedCount++;
+
+                // Update IndexedDB cache with refreshed result (non-blocking)
+                if (!isError) {
+                    putCachedPoint({
+                        key: `${point.lat},${point.lng}`,
+                        lat: point.lat,
+                        lng: point.lng,
+                        available: markerData.available,
+                        color: markerData.color,
+                        result,
+                        isError: false,
+                        timestamp: Date.now()
+                    }).catch(e => console.error('Error updating cache:', e));
+                }
             }
         } catch (loopError) {
             console.error(`Unexpected error retrying point ${i}:`, loopError);
@@ -690,7 +846,6 @@ async function retryNotAvailablePoints() {
         document.getElementById('progressText').textContent = message;
         document.getElementById('speedText').textContent = '';
         updateHeatmap();
-        saveToLocalStorage();
     }
     
     // Reset UI
@@ -701,22 +856,27 @@ async function retryNotAvailablePoints() {
     scanRunning = false;
 }
 
-// ===== Export Functions =====
-
 /**
- * Export results as JSON
+ * Export all cached results as JSON
  */
-function exportJSON() {
-    if (scanResults.length === 0) {
-        alert('No results to export');
+async function exportJSON() {
+    let allPoints;
+    try {
+        allPoints = await getAllCachedPoints();
+    } catch (e) {
+        console.error('Error reading cache:', e);
+        allPoints = [];
+    }
+
+    if (allPoints.length === 0) {
+        alert('No cached results to export');
         return;
     }
 
     const data = {
-        scanDate: new Date().toISOString(),
-        totalPoints: scanResults.length,
-        statistics: stats,
-        results: scanResults
+        exportDate: new Date().toISOString(),
+        totalPoints: allPoints.length,
+        results: allPoints
     };
 
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -729,17 +889,25 @@ function exportJSON() {
 }
 
 /**
- * Export results as CSV
+ * Export all cached results as CSV
  */
-function exportCSV() {
-    if (scanResults.length === 0) {
-        alert('No results to export');
+async function exportCSV() {
+    let allPoints;
+    try {
+        allPoints = await getAllCachedPoints();
+    } catch (e) {
+        console.error('Error reading cache:', e);
+        allPoints = [];
+    }
+
+    if (allPoints.length === 0) {
+        alert('No cached results to export');
         return;
     }
 
     let csv = 'Latitude,Longitude,Fiber Available,Status,Error\n';
     
-    scanResults.forEach(result => {
+    allPoints.forEach(result => {
         const available = result.available ? 'Yes' : 'No';
         const error = result.isError ? 'Yes' : 'No';
         const status = result.available ? 'Available' : (result.isError ? 'Error' : 'Not Available');
@@ -755,86 +923,148 @@ function exportCSV() {
     URL.revokeObjectURL(url);
 }
 
-// ===== LocalStorage Functions =====
+// ===== IndexedDB Persistence Functions =====
 
 /**
- * Save results to localStorage
+ * Load all cached points from IndexedDB and display them on the map
  */
-function saveToLocalStorage() {
-    const data = {
-        scanDate: new Date().toISOString(),
-        statistics: stats,
-        results: scanResults
-    };
-    localStorage.setItem('sfaxFiberScanResults', JSON.stringify(data));
-}
-
-/**
- * Load results from localStorage
- */
-function loadFromLocalStorage() {
-    const data = localStorage.getItem('sfaxFiberScanResults');
-    if (!data) {
-        alert('No previous results found');
+async function loadFromIndexedDB() {
+    let allCached;
+    try {
+        allCached = await getAllCachedPoints();
+    } catch (e) {
+        console.error('Error loading from IndexedDB:', e);
+        alert('Error loading cached results');
         return;
     }
 
-    try {
-        const parsed = JSON.parse(data);
-        
-        // Clear current results
-        markersLayer.clearLayers();
-        scanResults = parsed.results || [];
-        stats = parsed.statistics || { total: 0, available: 0, notAvailable: 0, errors: 0 };
-        
-        // Restore markers (low opacity so the underlying map remains visible)
-        scanResults.forEach(result => {
-            const marker = L.circleMarker([result.lat, result.lng], {
-                radius: 6,
-                fillColor: result.color,
-                color: result.color,
-                weight: 1,
-                opacity: 0.4,
-                fillOpacity: 0.25
-            });
-            
-            let status = result.available ? 'Fiber Available (GPON)' : 
-                        (result.isError ? 'Error / Unknown' : 'Fiber Not Available');
-            
-            marker.bindPopup(`
-                <div>
-                    <h6>${status}</h6>
-                    <p><strong>Coordinates:</strong><br>
-                    Lat: ${result.lat.toFixed(5)}, Lng: ${result.lng.toFixed(5)}</p>
-                </div>
-            `);
-            
-            marker.addTo(markersLayer);
-        });
-        
-        // Update UI
-        updateStats();
-        updateProgress(scanResults.length, scanResults.length);
-        updateHeatmap();
-        
-        alert(`Loaded ${scanResults.length} results from ${new Date(parsed.scanDate).toLocaleString()}`);
-    } catch (error) {
-        console.error('Error loading results:', error);
-        alert('Error loading previous results');
+    if (allCached.length === 0) {
+        alert('No cached results found');
+        return;
     }
+
+    // Clear current display
+    markersLayer.clearLayers();
+    scanResults = [];
+    stats = { total: 0, available: 0, notAvailable: 0, errors: 0, cached: 0 };
+
+    // Restore markers from cache
+    allCached.forEach(cached => {
+        const color = cached.color || markerColor(cached.isError, cached.available);
+
+        const marker = L.circleMarker([cached.lat, cached.lng], {
+            radius: 6,
+            fillColor: color,
+            color: color,
+            weight: 1,
+            opacity: 0.4,
+            fillOpacity: 0.25
+        });
+
+        const status = cached.available ? 'Fiber Available (GPON)' :
+                      (cached.isError ? 'Error / Unknown' : 'Fiber Not Available');
+
+        marker.bindPopup(`
+            <div>
+                <h6>${status}</h6>
+                <p><strong>Coordinates:</strong><br>
+                Lat: ${cached.lat.toFixed(5)}, Lng: ${cached.lng.toFixed(5)}</p>
+            </div>
+        `);
+
+        marker.addTo(markersLayer);
+
+        scanResults.push({
+            lat: cached.lat,
+            lng: cached.lng,
+            available: cached.available,
+            color,
+            result: cached.result,
+            isError: cached.isError
+        });
+
+        if (!cached.isError) {
+            stats.total++;
+            if (cached.available) stats.available++;
+            else stats.notAvailable++;
+        } else {
+            stats.errors++;
+        }
+    });
+
+    // Update UI
+    updateStats();
+    updateProgress(scanResults.length, scanResults.length);
+    updateHeatmap();
+
+    alert(`Loaded ${allCached.length} cached points from IndexedDB`);
+}
+
+/**
+ * Trigger the file chooser for JSON import
+ */
+function importFromJSON() {
+    document.getElementById('importJsonInput').click();
+}
+
+/**
+ * Handle the selected JSON file and import its records into IndexedDB
+ */
+async function handleImportJSON(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        const results = data.results || [];
+        if (results.length === 0) {
+            alert('No results found in the JSON file');
+            return;
+        }
+
+        let importedCount = 0;
+        for (const r of results) {
+            if (r.lat == null || r.lng == null) continue;
+            const key = r.key || `${r.lat},${r.lng}`;
+            const isErr = r.isError ?? false;
+            const avail = r.available ?? false;
+            await putCachedPoint({
+                key,
+                lat: r.lat,
+                lng: r.lng,
+                available: avail,
+                color: r.color || markerColor(isErr, avail),
+                result: r.result || null,
+                isError: isErr,
+                timestamp: r.timestamp || Date.now()
+            });
+            importedCount++;
+        }
+
+        alert(`Imported ${importedCount} points into the cache. Click "Load Previous Results" to display them.`);
+        updateCoverageInfo();
+    } catch (error) {
+        console.error('Error importing JSON:', error);
+        alert('Error importing JSON file. Please make sure it is a valid scan export.');
+    }
+
+    // Reset file input so the same file can be re-selected if needed
+    event.target.value = '';
 }
 
 /**
  * Clear all results
  */
 function clearAll() {
-    if (!confirm('Are you sure you want to clear all results?')) {
+    if (!confirm('Are you sure you want to clear all results from the map?')) {
         return;
     }
 
     markersLayer.clearLayers();
     scanResults = [];
-    stats = { total: 0, available: 0, notAvailable: 0, errors: 0 };
+    stats = { total: 0, available: 0, notAvailable: 0, errors: 0, cached: 0 };
     
     if (heatmapLayer) {
         map.removeLayer(heatmapLayer);
@@ -845,8 +1075,13 @@ function clearAll() {
     document.getElementById('progressBar').style.width = '0%';
     document.getElementById('progressBar').textContent = '0%';
     document.getElementById('progressText').textContent = 'Ready to scan';
-    
-    localStorage.removeItem('sfaxFiberScanResults');
+    document.getElementById('coverageInfo').textContent = '';
+
+    if (confirm('Also clear the IndexedDB cache? This permanently deletes all saved scan data.')) {
+        clearCachedPoints()
+            .then(() => alert('IndexedDB cache cleared.'))
+            .catch(e => console.error('Error clearing cache:', e));
+    }
 }
 
 // ===== Event Listeners =====
@@ -873,10 +1108,14 @@ document.addEventListener('DOMContentLoaded', function() {
     // Export buttons
     document.getElementById('exportJsonBtn').addEventListener('click', exportJSON);
     document.getElementById('exportCsvBtn').addEventListener('click', exportCSV);
+
+    // Import JSON
+    document.getElementById('importJsonBtn').addEventListener('click', importFromJSON);
+    document.getElementById('importJsonInput').addEventListener('change', handleImportJSON);
     
     // Other actions
     document.getElementById('retryNotAvailableBtn').addEventListener('click', retryNotAvailablePoints);
-    document.getElementById('loadPreviousBtn').addEventListener('click', loadFromLocalStorage);
+    document.getElementById('loadPreviousBtn').addEventListener('click', loadFromIndexedDB);
     document.getElementById('clearBtn').addEventListener('click', clearAll);
     
     // Heatmap toggle
@@ -891,6 +1130,15 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     });
+
+    // Hide all points toggle
+    document.getElementById('hidePoints').addEventListener('change', function(e) {
+        if (e.target.checked) {
+            map.removeLayer(markersLayer);
+        } else {
+            markersLayer.addTo(map);
+        }
+    });
     
     // Rectangle draw toggle
     document.getElementById('drawRectangle').addEventListener('change', function(e) {
@@ -902,12 +1150,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Check for previous results on load
-    const previousData = localStorage.getItem('sfaxFiberScanResults');
-    if (previousData) {
-        const loadPrevious = confirm('Previous scan results found. Would you like to load them?');
-        if (loadPrevious) {
-            loadFromLocalStorage();
+    // Check for cached results in IndexedDB on load
+    openDB().then(() => getAllCachedPoints()).then(cached => {
+        if (cached.length > 0) {
+            const loadPrevious = confirm(`Found ${cached.length} cached points in IndexedDB. Load them on the map?`);
+            if (loadPrevious) {
+                loadFromIndexedDB();
+            }
         }
-    }
+    }).catch(e => console.error('Error checking IndexedDB on load:', e));
 });

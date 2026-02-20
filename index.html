@@ -101,6 +101,7 @@
                             </div>
                             <p class="small mb-1 text-center" id="progressText">Ready to scan</p>
                             <p class="small mb-0 text-center text-muted" id="speedText"></p>
+                            <p class="small mb-0 text-center text-muted" id="coverageInfo"></p>
                         </div>
                     </div>
 
@@ -127,6 +128,10 @@
                                     <td class="small">🟡 Errors:</td>
                                     <td class="text-end small"><strong id="statErrors">0</strong></td>
                                 </tr>
+                                <tr>
+                                    <td class="small">💾 From Cache:</td>
+                                    <td class="text-end small"><strong id="statCached">0</strong></td>
+                                </tr>
                             </table>
                         </div>
                     </div>
@@ -141,6 +146,12 @@
                                 <input class="form-check-input" type="checkbox" id="showHeatmap">
                                 <label class="form-check-label small" for="showHeatmap">
                                     Show Heatmap
+                                </label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="hidePoints">
+                                <label class="form-check-label small" for="hidePoints">
+                                    Hide All Points
                                 </label>
                             </div>
                             <div class="form-check mb-2">
@@ -167,6 +178,10 @@
                             <button class="btn btn-primary btn-sm w-100 mb-2" id="exportCsvBtn">
                                 Export CSV
                             </button>
+                            <button class="btn btn-secondary btn-sm w-100 mb-2" id="importJsonBtn">
+                                Import JSON
+                            </button>
+                            <input type="file" id="importJsonInput" accept=".json" style="display:none">
                             <button class="btn btn-secondary btn-sm w-100 mb-2" id="loadPreviousBtn">
                                 Load Previous Results
                             </button>
