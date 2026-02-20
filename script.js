@@ -707,8 +707,9 @@ function stopScan() {
 
 /**
  * Retry scanning for "Not Available" points - processes sequentially
+ * @param {boolean} skipConfirm - skip the confirmation dialog (used when called programmatically)
  */
-async function retryNotAvailablePoints() {
+async function retryNotAvailablePoints(skipConfirm = false) {
     if (scanRunning) return;
     
     // Filter to get only "Not Available" points (not errors, just fiber not available)
@@ -719,7 +720,8 @@ async function retryNotAvailablePoints() {
         return;
     }
     
-    const confirmRetry = confirm(`Found ${notAvailablePoints.length} "Not Available" points. Retry scanning these points?`);
+    const confirmRetry = skipConfirm ||
+        confirm(`Found ${notAvailablePoints.length} "Not Available" points. Retry scanning these points?`);
     if (!confirmRetry) return;
     
     // Set scan as running
@@ -997,7 +999,16 @@ async function loadFromIndexedDB() {
     updateProgress(scanResults.length, scanResults.length);
     updateHeatmap();
 
-    alert(`Loaded ${allCached.length} cached points from IndexedDB`);
+    const notAvailableCount = scanResults.filter(r => !r.isError && !r.available).length;
+    if (notAvailableCount > 0) {
+        const msg = `Loaded ${allCached.length} cached points (${notAvailableCount} "Not Available").\nRetry the "Not Available" points now?`;
+        if (confirm(msg)) {
+            retryNotAvailablePoints(true);
+            return;
+        }
+    } else {
+        alert(`Loaded ${allCached.length} cached points from IndexedDB`);
+    }
 }
 
 /**
@@ -1084,6 +1095,110 @@ function clearAll() {
     }
 }
 
+// ===== Seed-file Initialization =====
+
+/**
+ * Try to seed the IndexedDB from a JSON file at the given URL.
+ * Only inserts records whose key is NOT already in the DB (preserves user scans).
+ * Returns the number of newly imported records.
+ */
+async function tryImportSeedJSON(url) {
+    try {
+        const res = await fetch(url);
+        if (!res.ok) return 0;
+        const data = await res.json();
+        const results = data.results || [];
+        if (!results.length) return 0;
+
+        // Load existing keys in one DB read for efficient lookup
+        const existing = await getAllCachedPoints();
+        const existingKeys = new Set(existing.map(r => r.key));
+
+        let count = 0;
+        for (const r of results) {
+            if (r.lat == null || r.lng == null) continue;
+            const key = r.key || `${r.lat},${r.lng}`;
+            if (existingKeys.has(key)) continue;
+            const isErr = r.isError ?? false;
+            const avail = r.available ?? false;
+            await putCachedPoint({
+                key,
+                lat: r.lat,
+                lng: r.lng,
+                available: avail,
+                color: r.color || markerColor(isErr, avail),
+                result: r.result || null,
+                isError: isErr,
+                timestamp: r.timestamp || Date.now()
+            });
+            count++;
+        }
+        if (count > 0) console.log(`Seeded ${count} new records from ${url}`);
+        return count;
+    } catch (e) {
+        return 0; // File absent or parse error — silently skip
+    }
+}
+
+/**
+ * Try to seed the IndexedDB from a CSV file at the given URL.
+ * Expected columns: Latitude,Longitude,Fiber Available,Status,Error
+ * Only inserts records whose key is NOT already in the DB.
+ */
+async function tryImportSeedCSV(url) {
+    try {
+        const res = await fetch(url);
+        if (!res.ok) return 0;
+        const text = await res.text();
+        const lines = text.trim().split('\n');
+        if (lines.length <= 1) return 0; // header only
+
+        const existing = await getAllCachedPoints();
+        const existingKeys = new Set(existing.map(r => r.key));
+
+        let count = 0;
+        for (let i = 1; i < lines.length; i++) {
+            const parts = lines[i].split(',');
+            if (parts.length < 2) continue;
+            const lat = parseFloat(parts[0]);
+            const lng = parseFloat(parts[1]);
+            if (isNaN(lat) || isNaN(lng)) continue;
+            const latVal = parseFloat(lat.toFixed(6));
+            const lngVal = parseFloat(lng.toFixed(6));
+            const key = `${latVal},${lngVal}`;
+            if (existingKeys.has(key)) continue;
+            const avail = parts[2] ? parts[2].trim().toLowerCase() === 'yes' : false;
+            const isErr = parts[4] ? parts[4].trim().toLowerCase() === 'yes' : false;
+            await putCachedPoint({
+                key,
+                lat: latVal,
+                lng: lngVal,
+                available: avail,
+                color: markerColor(isErr, avail),
+                result: null,
+                isError: isErr,
+                timestamp: Date.now()
+            });
+            count++;
+        }
+        if (count > 0) console.log(`Seeded ${count} new records from ${url}`);
+        return count;
+    } catch (e) {
+        return 0; // File absent or parse error — silently skip
+    }
+}
+
+/**
+ * Seed the IndexedDB from optional data files in the app root.
+ * Tries cached_coverage.json first, then cached_coverage.csv.
+ * Already-cached keys are never overwritten.
+ */
+async function seedFromFile() {
+    const jsonCount = await tryImportSeedJSON('./cached_coverage.json');
+    const csvCount  = await tryImportSeedCSV('./cached_coverage.csv');
+    return jsonCount + csvCount;
+}
+
 // ===== Event Listeners =====
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -1150,8 +1265,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Check for cached results in IndexedDB on load
-    openDB().then(() => getAllCachedPoints()).then(cached => {
+    // Seed from optional data files in the app root, then check IndexedDB for cached results
+    seedFromFile().then(() => {
+        return openDB().then(() => getAllCachedPoints());
+    }).then(cached => {
         if (cached.length > 0) {
             const loadPrevious = confirm(`Found ${cached.length} cached points in IndexedDB. Load them on the map?`);
             if (loadPrevious) {
