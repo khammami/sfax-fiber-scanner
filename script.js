@@ -10,6 +10,20 @@ let scanPaused = false;
 const RETRY_DELAY_MS = 1000; // Delay before retrying failed requests
 const COORDINATE_TOLERANCE = 0.00001; // Tolerance for comparing coordinates
 
+// CORS proxy for GitHub Pages deployment (avoids cross-origin preflight failures)
+const API_BASE_URL = "https://geo.tunisietelecom.tn/rsm/RSMService.svc";
+const isLocalhost = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
+// "https://corsproxy.io/?url=" Disable proxy due to custom domain (free for github.io")
+const CORS_PROXY = isLocalhost ? "" : ""; 
+
+/**
+ * Build API URL, routing through CORS proxy when not on localhost
+ */
+function apiUrl(endpoint) {
+    const url = API_BASE_URL + endpoint;
+    return CORS_PROXY ? CORS_PROXY + encodeURIComponent(url) : url;
+}
+
 // ===== IndexedDB Cache Layer =====
 const DB_NAME = 'sfaxFiberScannerDB';
 const DB_VERSION = 1;
@@ -84,20 +98,6 @@ async function clearCachedPoints() {
 function markerColor(isError, available) {
     if (isError) return '#ffc107';  // yellow for errors
     return available ? '#28a745' : '#dc3545';  // green / red
-}
-
-// On localhost, route API calls through the local dev server proxy to avoid CORS issues.
-// In production (GitHub Pages / custom domain), call the API directly.
-const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-const API_BASE_URL = isLocalhost
-    ? "/api/rsm/RSMService.svc"
-    : "https://geo.tunisietelecom.tn/rsm/RSMService.svc";
-
-/**
- * Build API URL for the given endpoint path.
- */
-function apiUrl(endpoint) {
-    return API_BASE_URL + endpoint;
 }
 
 // Statistics
