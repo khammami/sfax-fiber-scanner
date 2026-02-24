@@ -1,0 +1,12 @@
+{
+  "name": "sfax-fiber-scanner",
+  "version": "1.0.0",
+  "description": "Local dev server for Sfax Fiber Scanner with API proxy",
+  "scripts": {
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "http-proxy-middleware": "^3.0.5"
+  }
+}
