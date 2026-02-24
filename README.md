@@ -16,11 +16,28 @@ A standalone web application that systematically scans the Sfax, Tunisia region 
 - ⚙️ **Configurable Settings**: Adjust scan bounds, step size, and API request delay
 - 📱 **Responsive Design**: Works on desktop and mobile devices
 
+## Local Development
+
+To run the app locally without CORS errors, use the built-in dev server:
+
+```bash
+npm install
+npm run dev
+```
+
+Then open **http://localhost:3000** in your browser.
+
+The dev server:
+- Serves `index.html`, `script.js`, `style.css`, and other static files
+- Proxies API requests from `/api/rsm/*` to `https://geo.tunisietelecom.tn/rsm/*`
+
+> **Note:** Opening `index.html` directly as a file (`file://`) or via a simple file server that does not proxy API calls will result in CORS errors because the browser blocks cross-origin requests to `geo.tunisietelecom.tn`.
+
 ## How to Use
 
 1. **Open the Application**
-   - Simply open `index.html` in a modern web browser (Chrome, Firefox, Edge, Safari)
-   - No installation or build process required!
+   - Run `npm run dev` and open **http://localhost:3000** (see [Local Development](#local-development) above)
+   - Or deploy to GitHub Pages / a custom domain — API calls go directly without a proxy
 
 2. **Configure Scan Area**
    - Use the default Sfax region bounds (34.70-34.78 lat, 10.72-10.80 lng)
@@ -159,6 +176,8 @@ sfax-fiber-scanner/
 ├── index.html      # Main HTML page with map and UI
 ├── style.css       # Styles and responsive design
 ├── script.js       # JavaScript logic and API integration
+├── server.js       # Local dev server with API proxy (Node.js)
+├── package.json    # npm dependencies and dev script
 └── README.md       # This file
 ```
 

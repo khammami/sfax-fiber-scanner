@@ -86,18 +86,18 @@ function markerColor(isError, available) {
     return available ? '#28a745' : '#dc3545';  // green / red
 }
 
-// CORS proxy for GitHub Pages deployment (avoids cross-origin preflight failures)
-const API_BASE_URL = "https://geo.tunisietelecom.tn/rsm/RSMService.svc";
-const isLocalhost = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
-// "https://corsproxy.io/?url=" Disable proxy due to custom domain (free for github.io")
-const CORS_PROXY = isLocalhost ? "" : ""; 
+// On localhost, route API calls through the local dev server proxy to avoid CORS issues.
+// In production (GitHub Pages / custom domain), call the API directly.
+const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const API_BASE_URL = isLocalhost
+    ? "/api/rsm/RSMService.svc"
+    : "https://geo.tunisietelecom.tn/rsm/RSMService.svc";
 
 /**
- * Build API URL, routing through CORS proxy when not on localhost
+ * Build API URL for the given endpoint path.
  */
 function apiUrl(endpoint) {
-    const url = API_BASE_URL + endpoint;
-    return CORS_PROXY ? CORS_PROXY + encodeURIComponent(url) : url;
+    return API_BASE_URL + endpoint;
 }
 
 // Statistics
