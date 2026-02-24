@@ -6,12 +6,13 @@ const app = express();
 const PORT = 3000;
 
 // Proxy /api/rsm/* → https://geo.tunisietelecom.tn/rsm/*
+// Express strips the mount path (/api/rsm) before http-proxy-middleware sees it,
+// so the remaining path (e.g. /RSMService.svc/getAppVersion) is appended to the target.
 app.use(
     "/api/rsm",
     createProxyMiddleware({
-        target: "https://geo.tunisietelecom.tn",
+        target: "https://geo.tunisietelecom.tn/rsm",
         changeOrigin: true,
-        pathRewrite: { "^/api/rsm": "/rsm" },
     })
 );
 
