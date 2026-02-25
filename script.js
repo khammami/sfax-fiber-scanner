@@ -350,9 +350,11 @@ function addMarker(lat, lng, result, isError = false) {
 // ===== Heatmap Functions =====
 
 /**
- * Update heatmap layer with current results
+ * Update heatmap layer with current results.
+ * @param {boolean} forceShow - when true, add the heatmap to the map unconditionally
+ *                              (ignores the checkbox — used by the startup initializer)
  */
-function updateHeatmap() {
+function updateHeatmap(forceShow = false) {
     if (heatmapLayer) {
         map.removeLayer(heatmapLayer);
     }
@@ -374,12 +376,34 @@ function updateHeatmap() {
         }
     });
 
-    if (document.getElementById('showHeatmap').checked) {
+    if (forceShow || document.getElementById('showHeatmap').checked) {
         heatmapLayer.addTo(map);
     }
 }
 
-// ===== Scan Functions =====
+/**
+ * Apply the default map visibility state after data has been loaded:
+ *  - Heatmap layer: built from current scanResults and explicitly added to the map;
+ *    the #showHeatmap checkbox is set to checked.
+ *  - Point markers: markersLayer is removed from the map;
+ *    the #hidePoints checkbox is set to checked.
+ * Called explicitly after the startup data load to guarantee a deterministic visual state.
+ */
+function applyInitialMapVisibility() {
+    // 1. Sync checkbox states to the desired defaults
+    document.getElementById('showHeatmap').checked = true;
+    document.getElementById('hidePoints').checked = true;
+
+    // 2. Build the heatmap layer and force it onto the map
+    updateHeatmap(true);
+
+    // 3. Ensure point markers are not on the map
+    if (map.hasLayer(markersLayer)) {
+        map.removeLayer(markersLayer);
+    }
+}
+
+
 
 /**
  * Number of grid steps needed to cover a range.
@@ -1297,14 +1321,18 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Always seed from cached_coverage.json / .csv on startup, then load all cached data automatically.
-    // If cached_coverage.json was missing, sync the current DB to it (localhost only).
+    // Strict startup sequence:
+    // 1. Seed IndexedDB from cached_coverage.json / .csv (no-op if already up to date)
+    // 2. If cached_coverage.json was missing on disk, write the current DB back to it (localhost only)
+    // 3. Load all cached points into scanResults and render markers into markersLayer
+    // 4. Explicitly apply the default map visibility: heatmap ON, point markers HIDDEN
     seedFromFile()
         .then(async ({ jsonFound }) => {
             if (!jsonFound) {
                 await syncCoverageJsonToServer();
             }
-            return loadFromIndexedDB(true);
+            await loadFromIndexedDB(true);
+            applyInitialMapVisibility();
         })
         .catch(e => console.error('Error initializing data:', e));
 });
