@@ -1228,7 +1228,8 @@ async function seedFromFile() {
 }
 
 /**
- * Write all current IndexedDB points to cached_coverage.json via the local dev server.
+ * Write fiber-available points from IndexedDB to cached_coverage.json via the local dev server.
+ * Only available points are saved to keep the file small.
  * Only works on localhost (requires the POST /api/save-coverage endpoint in server.js).
  * Silently skipped when not on localhost.
  */
@@ -1236,11 +1237,13 @@ async function syncCoverageJsonToServer() {
     if (!isLocalhost) return;
     try {
         const allPoints = await getAllCachedPoints();
-        if (allPoints.length === 0) return;
+        // Only persist available (fiber-covered) points to keep the file compact
+        const availablePoints = allPoints.filter(p => p.available && !p.isError);
+        if (availablePoints.length === 0) return;
         const data = {
             exportDate: new Date().toISOString(),
-            totalPoints: allPoints.length,
-            results: allPoints
+            totalPoints: availablePoints.length,
+            results: availablePoints
         };
         const res = await fetch('/api/save-coverage', {
             method: 'POST',
@@ -1248,7 +1251,7 @@ async function syncCoverageJsonToServer() {
             body: JSON.stringify(data)
         });
         if (res.ok) {
-            console.log(`cached_coverage.json synced (${allPoints.length} points)`);
+            console.log(`cached_coverage.json synced (${availablePoints.length} available points)`);
         }
     } catch (e) {
         console.error('Error syncing cached_coverage.json:', e);
