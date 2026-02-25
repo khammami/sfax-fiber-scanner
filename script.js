@@ -234,8 +234,8 @@ function initMap() {
     };
     L.control.layers(baseLayers, null, { position: 'topright' }).addTo(map);
 
-    // Initialize marker layer
-    markersLayer = L.layerGroup().addTo(map);
+    // Initialize marker layer (not added to map — hidden by default)
+    markersLayer = L.layerGroup();
 
     // Initialize heatmap layer (not added by default)
     heatmapLayer = null;
@@ -928,20 +928,21 @@ async function exportCSV() {
 // ===== IndexedDB Persistence Functions =====
 
 /**
- * Load all cached points from IndexedDB and display them on the map
+ * Load all cached points from IndexedDB and display them on the map.
+ * @param {boolean} silent - when true, suppress informational alerts (used for auto-load on startup)
  */
-async function loadFromIndexedDB() {
+async function loadFromIndexedDB(silent = false) {
     let allCached;
     try {
         allCached = await getAllCachedPoints();
     } catch (e) {
         console.error('Error loading from IndexedDB:', e);
-        alert('Error loading cached results');
+        if (!silent) alert('Error loading cached results');
         return;
     }
 
     if (allCached.length === 0) {
-        alert('No cached results found');
+        if (!silent) alert('No cached results found');
         return;
     }
 
@@ -1006,7 +1007,7 @@ async function loadFromIndexedDB() {
             retryNotAvailablePoints(true);
             return;
         }
-    } else {
+    } else if (!silent) {
         alert(`Loaded ${allCached.length} cached points from IndexedDB`);
     }
 }
@@ -1265,15 +1266,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Seed from optional data files in the app root, then check IndexedDB for cached results
-    seedFromFile().then(() => {
-        return openDB().then(() => getAllCachedPoints());
-    }).then(cached => {
-        if (cached.length > 0) {
-            const loadPrevious = confirm(`Found ${cached.length} cached points in IndexedDB. Load them on the map?`);
-            if (loadPrevious) {
-                loadFromIndexedDB();
-            }
-        }
-    }).catch(e => console.error('Error checking IndexedDB on load:', e));
+    // Always seed from cached_coverage.json / .csv on startup, then load all cached data automatically
+    seedFromFile()
+        .then(() => loadFromIndexedDB(true))
+        .catch(e => console.error('Error initializing data:', e));
 });
