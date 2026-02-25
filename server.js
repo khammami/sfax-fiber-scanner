@@ -1,9 +1,14 @@
 const express = require("express");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const path = require("path");
+const fs = require("fs");
 
 const app = express();
 const PORT = 3000;
+const COVERAGE_FILE = path.join(__dirname, "cached_coverage.json");
+
+// Parse JSON request bodies
+app.use(express.json({ limit: "50mb" }));
 
 // Proxy /api/rsm/* → https://geo.tunisietelecom.tn/rsm/*
 // Express strips the mount path (/api/rsm) before http-proxy-middleware sees it,
@@ -15,6 +20,19 @@ app.use(
         changeOrigin: true,
     })
 );
+
+// Write the current IndexedDB state to cached_coverage.json.
+// Called by the client when the file is missing on startup so the local cache stays in sync.
+app.post("/api/save-coverage", (req, res) => {
+    try {
+        fs.writeFileSync(COVERAGE_FILE, JSON.stringify(req.body, null, 2), "utf-8");
+        console.log(`cached_coverage.json updated (${req.body.totalPoints ?? "?"} points)`);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error("Error writing cached_coverage.json:", err);
+        res.status(500).json({ ok: false, error: err.message });
+    }
+});
 
 // Serve static files from the project root
 app.use(express.static(path.join(__dirname)));

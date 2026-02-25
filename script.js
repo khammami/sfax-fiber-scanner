@@ -1000,15 +1000,17 @@ async function loadFromIndexedDB(silent = false) {
     updateProgress(scanResults.length, scanResults.length);
     updateHeatmap();
 
-    const notAvailableCount = scanResults.filter(r => !r.isError && !r.available).length;
-    if (notAvailableCount > 0) {
-        const msg = `Loaded ${allCached.length} cached points (${notAvailableCount} "Not Available").\nRetry the "Not Available" points now?`;
-        if (confirm(msg)) {
-            retryNotAvailablePoints(true);
-            return;
+    if (!silent) {
+        const notAvailableCount = scanResults.filter(r => !r.isError && !r.available).length;
+        if (notAvailableCount > 0) {
+            const msg = `Loaded ${allCached.length} cached points (${notAvailableCount} "Not Available").\nRetry the "Not Available" points now?`;
+            if (confirm(msg)) {
+                retryNotAvailablePoints(true);
+                return;
+            }
+        } else {
+            alert(`Loaded ${allCached.length} cached points from IndexedDB`);
         }
-    } else if (!silent) {
-        alert(`Loaded ${allCached.length} cached points from IndexedDB`);
     }
 }
 
@@ -1101,15 +1103,15 @@ function clearAll() {
 /**
  * Try to seed the IndexedDB from a JSON file at the given URL.
  * Only inserts records whose key is NOT already in the DB (preserves user scans).
- * Returns the number of newly imported records.
+ * Returns { count, found } where found=true when the file existed and was parseable.
  */
 async function tryImportSeedJSON(url) {
     try {
         const res = await fetch(url);
-        if (!res.ok) return 0;
+        if (!res.ok) return { count: 0, found: false };
         const data = await res.json();
         const results = data.results || [];
-        if (!results.length) return 0;
+        if (!results.length) return { count: 0, found: true };
 
         // Load existing keys in one DB read for efficient lookup
         const existing = await getAllCachedPoints();
@@ -1135,9 +1137,9 @@ async function tryImportSeedJSON(url) {
             count++;
         }
         if (count > 0) console.log(`Seeded ${count} new records from ${url}`);
-        return count;
+        return { count, found: true };
     } catch (e) {
-        return 0; // File absent or parse error — silently skip
+        return { count: 0, found: false }; // File absent or parse error — silently skip
     }
 }
 
@@ -1193,11 +1195,40 @@ async function tryImportSeedCSV(url) {
  * Seed the IndexedDB from optional data files in the app root.
  * Tries cached_coverage.json first, then cached_coverage.csv.
  * Already-cached keys are never overwritten.
+ * Returns { totalImported, jsonFound } — jsonFound=true when cached_coverage.json existed.
  */
 async function seedFromFile() {
-    const jsonCount = await tryImportSeedJSON('./cached_coverage.json');
-    const csvCount  = await tryImportSeedCSV('./cached_coverage.csv');
-    return jsonCount + csvCount;
+    const json = await tryImportSeedJSON('./cached_coverage.json');
+    const csvCount = await tryImportSeedCSV('./cached_coverage.csv');
+    return { totalImported: json.count + csvCount, jsonFound: json.found };
+}
+
+/**
+ * Write all current IndexedDB points to cached_coverage.json via the local dev server.
+ * Only works on localhost (requires the POST /api/save-coverage endpoint in server.js).
+ * Silently skipped when not on localhost.
+ */
+async function syncCoverageJsonToServer() {
+    if (!isLocalhost) return;
+    try {
+        const allPoints = await getAllCachedPoints();
+        if (allPoints.length === 0) return;
+        const data = {
+            exportDate: new Date().toISOString(),
+            totalPoints: allPoints.length,
+            results: allPoints
+        };
+        const res = await fetch('/api/save-coverage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (res.ok) {
+            console.log(`cached_coverage.json synced (${allPoints.length} points)`);
+        }
+    } catch (e) {
+        console.error('Error syncing cached_coverage.json:', e);
+    }
 }
 
 // ===== Event Listeners =====
@@ -1266,8 +1297,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Always seed from cached_coverage.json / .csv on startup, then load all cached data automatically
+    // Always seed from cached_coverage.json / .csv on startup, then load all cached data automatically.
+    // If cached_coverage.json was missing, sync the current DB to it (localhost only).
     seedFromFile()
-        .then(() => loadFromIndexedDB(true))
+        .then(async ({ jsonFound }) => {
+            if (!jsonFound) {
+                await syncCoverageJsonToServer();
+            }
+            return loadFromIndexedDB(true);
+        })
         .catch(e => console.error('Error initializing data:', e));
 });
