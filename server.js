@@ -7,12 +7,11 @@ const app = express();
 const PORT = 3000;
 const COVERAGE_FILE = path.join(__dirname, "cached_coverage.json");
 
-// Parse JSON request bodies
-app.use(express.json({ limit: "50mb" }));
-
 // Proxy /api/rsm/* → https://geo.tunisietelecom.tn/rsm/*
-// Express strips the mount path (/api/rsm) before http-proxy-middleware sees it,
-// so the remaining path (e.g. /RSMService.svc/getAppVersion) is appended to the target.
+// IMPORTANT: this must be registered BEFORE express.json() so the raw request
+// body stream is forwarded intact to the upstream server.  If a body-parser
+// middleware runs first it consumes the stream and the proxy sends an empty body,
+// causing the upstream to hang on POST requests.
 app.use(
     "/api/rsm",
     createProxyMiddleware({
@@ -20,6 +19,9 @@ app.use(
         changeOrigin: true,
     })
 );
+
+// Parse JSON request bodies (only affects non-proxied routes below this line)
+app.use(express.json({ limit: "50mb" }));
 
 // Write the current IndexedDB state to cached_coverage.json.
 // Called by the client when the file is missing on startup so the local cache stays in sync.
