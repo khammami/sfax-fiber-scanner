@@ -678,6 +678,7 @@ async function startScan() {
         document.getElementById('speedText').textContent = '';
         updateHeatmap();
         updateCoverageInfo();
+        syncCoverageJsonToServer();
     }
 
     // Reset UI
@@ -726,6 +727,7 @@ function stopScan() {
     
     if (scanResults.length > 0) {
         updateHeatmap();
+        syncCoverageJsonToServer();
     }
 }
 
@@ -872,6 +874,7 @@ async function retryNotAvailablePoints(skipConfirm = false) {
         document.getElementById('progressText').textContent = message;
         document.getElementById('speedText').textContent = '';
         updateHeatmap();
+        syncCoverageJsonToServer();
     }
     
     // Reset UI
