@@ -362,14 +362,14 @@ function updateHeatmap(forceShow = false) {
     // Only show fiber-available points so the heatmap represents coverage
     const heatData = scanResults
         .filter(r => !r.isError && r.available)
-        .map(r => [r.lat, r.lng, 1.0]);
+        .map(r => [r.lat, r.lng, 0.3]);
 
     heatmapLayer = L.heatLayer(heatData, {
-        radius: 25,
+        radius: 10,
         blur: 15,
         maxZoom: 17,
         max: 1.0,
-        minOpacity: 0.1,
+        minOpacity: 0.3,
         gradient: {
             0.4: '#28a745',
             1.0: '#155724'
