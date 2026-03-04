@@ -630,17 +630,19 @@ async function startScan() {
                     } else {
                         stats.notAvailable++;
                     }
-                    // Save to IndexedDB cache (non-blocking)
-                    putCachedPoint({
-                        key: cacheKey,
-                        lat: point.lat,
-                        lng: point.lng,
-                        available: markerData.available,
-                        color: markerData.color,
-                        result,
-                        isError: false,
-                        timestamp: Date.now()
-                    }).catch(e => console.error('Error saving to cache:', e));
+                    // Save to IndexedDB cache (non-blocking) — only available points
+                    if (markerData.available) {
+                        putCachedPoint({
+                            key: cacheKey,
+                            lat: point.lat,
+                            lng: point.lng,
+                            available: true,
+                            color: markerData.color,
+                            result,
+                            isError: false,
+                            timestamp: Date.now()
+                        }).catch(e => console.error('Error saving to cache:', e));
+                    }
                 }
 
                 // Delay only for fresh API calls
@@ -827,13 +829,13 @@ async function retryNotAvailablePoints(skipConfirm = false) {
                 
                 updatedCount++;
 
-                // Update IndexedDB cache with refreshed result (non-blocking)
-                if (!isError) {
+                // Update IndexedDB cache with refreshed result (non-blocking) — only available points
+                if (!isError && markerData.available) {
                     putCachedPoint({
                         key: `${point.lat},${point.lng}`,
                         lat: point.lat,
                         lng: point.lng,
-                        available: markerData.available,
+                        available: true,
                         color: markerData.color,
                         result,
                         isError: false,
@@ -1147,10 +1149,12 @@ async function tryImportSeedJSON(url) {
         let count = 0;
         for (const r of results) {
             if (r.lat == null || r.lng == null) continue;
-            const key = r.key || `${r.lat},${r.lng}`;
-            if (existingKeys.has(key)) continue;
             const isErr = r.isError ?? false;
             const avail = r.available ?? false;
+            // Only cache available (fiber-covered) points
+            if (!avail || isErr) continue;
+            const key = r.key || `${r.lat},${r.lng}`;
+            if (existingKeys.has(key)) continue;
             await putCachedPoint({
                 key,
                 lat: r.lat,
@@ -1199,6 +1203,8 @@ async function tryImportSeedCSV(url) {
             if (existingKeys.has(key)) continue;
             const avail = parts[2] ? parts[2].trim().toLowerCase() === 'yes' : false;
             const isErr = parts[4] ? parts[4].trim().toLowerCase() === 'yes' : false;
+            // Only cache available (fiber-covered) points
+            if (!avail || isErr) continue;
             await putCachedPoint({
                 key,
                 lat: latVal,
