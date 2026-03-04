@@ -734,160 +734,6 @@ function stopScan() {
 }
 
 /**
- * Retry scanning for "Not Available" points - processes sequentially
- * @param {boolean} skipConfirm - skip the confirmation dialog (used when called programmatically)
- */
-async function retryNotAvailablePoints(skipConfirm = false) {
-    if (scanRunning) return;
-    
-    // Filter to get only "Not Available" points (not errors, just fiber not available)
-    const notAvailablePoints = scanResults.filter(r => !r.isError && !r.available);
-    
-    if (notAvailablePoints.length === 0) {
-        alert('No "Not Available" points to retry.');
-        return;
-    }
-    
-    const confirmRetry = skipConfirm ||
-        confirm(`Found ${notAvailablePoints.length} "Not Available" points. Retry scanning these points?`);
-    if (!confirmRetry) return;
-    
-    // Set scan as running
-    scanRunning = true;
-    scanPaused = false;
-    
-    // Update UI
-    document.getElementById('startBtn').disabled = true;
-    document.getElementById('pauseBtn').disabled = false;
-    document.getElementById('stopBtn').disabled = false;
-    document.getElementById('retryNotAvailableBtn').disabled = true;
-    document.getElementById('progressText').textContent = 'Retrying Not Available points...';
-    document.getElementById('speedText').textContent = '';
-    
-    const total = notAvailablePoints.length;
-    const delay = parseInt(document.getElementById('delayMs').value);
-    let updatedCount = 0;
-    let nowAvailableCount = 0;
-
-    const retryStartTime = Date.now();
-    
-    for (let i = 0; i < notAvailablePoints.length; i++) {
-        // Check if scan should stop
-        if (!scanRunning) break;
-        
-        // Check if scan is paused
-        while (scanPaused && scanRunning) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        
-        if (!scanRunning) break;
-
-        const pointData = notAvailablePoints[i];
-        try {
-            const { point, result, isError } = await processPoint(pointData);
-
-            // Find and remove old marker from map
-            markersLayer.eachLayer(layer => {
-                if (layer instanceof L.CircleMarker) {
-                    const latlng = layer.getLatLng();
-                    if (Math.abs(latlng.lat - point.lat) < COORDINATE_TOLERANCE && 
-                        Math.abs(latlng.lng - point.lng) < COORDINATE_TOLERANCE) {
-                        markersLayer.removeLayer(layer);
-                    }
-                }
-            });
-            
-            // Add new marker with updated result
-            const markerData = addMarker(point.lat, point.lng, result, isError);
-            
-            // Find and update the point in scanResults
-            const resultIndex = scanResults.findIndex(r => 
-                Math.abs(r.lat - point.lat) < COORDINATE_TOLERANCE && 
-                Math.abs(r.lng - point.lng) < COORDINATE_TOLERANCE
-            );
-            
-            if (resultIndex !== -1) {
-                const oldResult = scanResults[resultIndex];
-                
-                // Update statistics - remove old count (we know it was "Not Available")
-                if (!oldResult.isError && !oldResult.available) {
-                    stats.notAvailable--;
-                }
-                
-                // Update the result
-                scanResults[resultIndex] = { ...markerData, isError };
-                
-                // Update statistics - add new count based on new status
-                if (isError) {
-                    stats.errors++;
-                } else if (markerData.available) {
-                    stats.available++;
-                    nowAvailableCount++;
-                } else {
-                    stats.notAvailable++;
-                }
-                
-                updatedCount++;
-
-                // Update IndexedDB cache with refreshed result (non-blocking) — only available points
-                if (!isError && markerData.available) {
-                    putCachedPoint({
-                        key: `${point.lat},${point.lng}`,
-                        lat: point.lat,
-                        lng: point.lng,
-                        available: true,
-                        color: markerData.color,
-                        result,
-                        isError: false,
-                        timestamp: Date.now()
-                    }).catch(e => console.error('Error updating cache:', e));
-                }
-            }
-        } catch (loopError) {
-            console.error(`Unexpected error retrying point ${i}:`, loopError);
-            stats.errors++;
-        }
-
-        updateStats();
-        updateProgress(i + 1, total);
-
-        // Update speed display
-        const elapsedSec = (Date.now() - retryStartTime) / 1000;
-        if (elapsedSec > 0) {
-            const speed = ((i + 1) / elapsedSec).toFixed(1);
-            const remaining = total - (i + 1);
-            const eta = remaining > 0 ? Math.round(remaining / ((i + 1) / elapsedSec)) : 0;
-            const etaMin = Math.floor(eta / 60);
-            const etaSec = eta % 60;
-            document.getElementById('speedText').textContent = 
-                `⚡ ${speed} pts/sec | ETA: ${etaMin}m ${etaSec}s`;
-        }
-        
-        // Delay before next request
-        if (delay > 0) {
-            await new Promise(resolve => setTimeout(resolve, delay));
-        }
-    }
-    
-    // Retry complete
-    if (scanRunning) {
-        const totalTime = ((Date.now() - retryStartTime) / 1000).toFixed(1);
-        const message = `Retry complete! Updated ${updatedCount} points in ${totalTime}s. ${nowAvailableCount} are now available.`;
-        document.getElementById('progressText').textContent = message;
-        document.getElementById('speedText').textContent = '';
-        updateHeatmap();
-        syncCoverageJsonToServer();
-    }
-    
-    // Reset UI
-    document.getElementById('startBtn').disabled = false;
-    document.getElementById('pauseBtn').disabled = true;
-    document.getElementById('stopBtn').disabled = true;
-    document.getElementById('retryNotAvailableBtn').disabled = false;
-    scanRunning = false;
-}
-
-/**
  * Export all cached results as JSON
  */
 async function exportJSON() {
@@ -1030,16 +876,7 @@ async function loadFromIndexedDB(silent = false) {
     updateHeatmap();
 
     if (!silent) {
-        const notAvailableCount = scanResults.filter(r => !r.isError && !r.available).length;
-        if (notAvailableCount > 0) {
-            const msg = `Loaded ${allCached.length} cached points (${notAvailableCount} "Not Available").\nRetry the "Not Available" points now?`;
-            if (confirm(msg)) {
-                retryNotAvailablePoints(true);
-                return;
-            }
-        } else {
-            alert(`Loaded ${allCached.length} cached points from IndexedDB`);
-        }
+        alert(`Loaded ${allCached.length} cached points from IndexedDB`);
     }
 }
 
@@ -1297,7 +1134,6 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('importJsonInput').addEventListener('change', handleImportJSON);
     
     // Other actions
-    document.getElementById('retryNotAvailableBtn').addEventListener('click', retryNotAvailablePoints);
     document.getElementById('loadPreviousBtn').addEventListener('click', loadFromIndexedDB);
     document.getElementById('clearBtn').addEventListener('click', clearAll);
     
