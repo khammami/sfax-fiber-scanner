@@ -161,6 +161,68 @@ function codeCoordinates(x, y) {
     };
 }
 
+// ===== Bitmap Coverage Encoding =====
+
+/**
+ * Detect the grid step size from an array of coordinate values.
+ * Returns the smallest non-zero difference between sorted unique values,
+ * or null if fewer than 2 unique values exist.
+ */
+function detectStep(values) {
+    const unique = [...new Set(values.map(v => parseFloat(v.toFixed(6))))].sort((a, b) => a - b);
+    if (unique.length < 2) return null;
+    let minDiff = Infinity;
+    for (let i = 1; i < unique.length; i++) {
+        const diff = unique[i] - unique[i - 1];
+        if (diff > 1e-9 && diff < minDiff) minDiff = diff;
+    }
+    return minDiff < Infinity ? parseFloat(minDiff.toFixed(6)) : null;
+}
+
+/**
+ * Encode an array of { lat, lng } points into a base64 bitmap string.
+ * Each bit represents a grid cell: 1 = fiber available.
+ */
+function encodeBitmap(points, latMin, lngMin, latSteps, lngSteps, step) {
+    const totalBits = latSteps * lngSteps;
+    const bytes = new Uint8Array(Math.ceil(totalBits / 8));
+    for (const p of points) {
+        const row = Math.round((p.lat - latMin) / step);
+        const col = Math.round((p.lng - lngMin) / step);
+        if (row < 0 || row >= latSteps || col < 0 || col >= lngSteps) continue;
+        const idx = row * lngSteps + col;
+        bytes[idx >> 3] |= (1 << (idx & 7));
+    }
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+/**
+ * Decode a base64 bitmap string back into an array of { lat, lng } points.
+ */
+function decodeBitmap(base64, latMin, lngMin, latSteps, lngSteps, step) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    const points = [];
+    const totalBits = latSteps * lngSteps;
+    for (let idx = 0; idx < totalBits; idx++) {
+        if (bytes[idx >> 3] & (1 << (idx & 7))) {
+            const row = Math.floor(idx / lngSteps);
+            const col = idx % lngSteps;
+            const lat = parseFloat((latMin + row * step).toFixed(6));
+            const lng = parseFloat((lngMin + col * step).toFixed(6));
+            points.push({ lat, lng });
+        }
+    }
+    return points;
+}
+
 // ===== API Functions =====
 
 /**
@@ -974,16 +1036,42 @@ function clearAll() {
 async function tryImportSeedJSON(url) {
     try {
         const res = await fetch(url);
-        if (!res.ok) return { count: 0, found: false };
+        if (!res.ok) return { count: 0, found: false, isBitmap: false };
         const data = await res.json();
-        const results = data.results || [];
-        if (!results.length) return { count: 0, found: true };
 
         // Load existing keys in one DB read for efficient lookup
         const existing = await getAllCachedPoints();
         const existingKeys = new Set(existing.map(r => r.key));
 
         let count = 0;
+
+        // Bitmap format (version 3)
+        if (data.version === 3 && data.bitmap) {
+            const { bounds, step, latSteps, lngSteps, bitmap } = data;
+            const points = decodeBitmap(bitmap, bounds.latMin, bounds.lngMin, latSteps, lngSteps, step);
+            for (const p of points) {
+                const key = `${p.lat},${p.lng}`;
+                if (existingKeys.has(key)) continue;
+                await putCachedPoint({
+                    key,
+                    lat: p.lat,
+                    lng: p.lng,
+                    available: true,
+                    color: '#28a745',
+                    result: null,
+                    isError: false,
+                    timestamp: Date.now()
+                });
+                count++;
+            }
+            if (count > 0) console.log(`Seeded ${count} new records from bitmap (${url})`);
+            return { count, found: true, isBitmap: true };
+        }
+
+        // Legacy format (array of point objects)
+        const results = data.results || [];
+        if (!results.length) return { count: 0, found: true, isBitmap: false };
+
         for (const r of results) {
             if (r.lat == null || r.lng == null) continue;
             const isErr = r.isError ?? false;
@@ -1004,10 +1092,10 @@ async function tryImportSeedJSON(url) {
             });
             count++;
         }
-        if (count > 0) console.log(`Seeded ${count} new records from ${url}`);
-        return { count, found: true };
+        if (count > 0) console.log(`Seeded ${count} new records from legacy JSON (${url})`);
+        return { count, found: true, isBitmap: false };
     } catch (e) {
-        return { count: 0, found: false }; // File absent or parse error — silently skip
+        return { count: 0, found: false, isBitmap: false }; // File absent or parse error — silently skip
     }
 }
 
@@ -1070,7 +1158,7 @@ async function tryImportSeedCSV(url) {
 async function seedFromFile() {
     const json = await tryImportSeedJSON('./cached_coverage.json');
     const csvCount = await tryImportSeedCSV('./cached_coverage.csv');
-    return { totalImported: json.count + csvCount, jsonFound: json.found };
+    return { totalImported: json.count + csvCount, jsonFound: json.found, isBitmap: json.isBitmap || false };
 }
 
 /**
@@ -1083,13 +1171,30 @@ async function syncCoverageJsonToServer() {
     if (!isLocalhost) return;
     try {
         const allPoints = await getAllCachedPoints();
-        // Only persist available (fiber-covered) points to keep the file compact
+        // Only persist available (fiber-covered) points
         const availablePoints = allPoints.filter(p => p.available && !p.isError);
         if (availablePoints.length === 0) return;
+
+        // Derive grid parameters from the actual data
+        const lats = availablePoints.map(p => p.lat);
+        const lngs = availablePoints.map(p => p.lng);
+        const latMin = Math.min(...lats);
+        const latMax = Math.max(...lats);
+        const lngMin = Math.min(...lngs);
+        const lngMax = Math.max(...lngs);
+        const step = detectStep(lats) || detectStep(lngs) || 0.002;
+        const latSteps = Math.round((latMax - latMin) / step) + 1;
+        const lngSteps = Math.round((lngMax - lngMin) / step) + 1;
+
         const data = {
+            version: 3,
             exportDate: new Date().toISOString(),
+            bounds: { latMin, latMax, lngMin, lngMax },
+            step,
+            latSteps,
+            lngSteps,
             totalPoints: availablePoints.length,
-            results: availablePoints
+            bitmap: encodeBitmap(availablePoints, latMin, lngMin, latSteps, lngSteps, step)
         };
         const res = await fetch('/api/save-coverage', {
             method: 'POST',
@@ -1097,7 +1202,7 @@ async function syncCoverageJsonToServer() {
             body: JSON.stringify(data)
         });
         if (res.ok) {
-            console.log(`cached_coverage.json synced (${availablePoints.length} available points)`);
+            console.log(`cached_coverage.json synced as bitmap (${availablePoints.length} points, ${(JSON.stringify(data).length / 1024).toFixed(1)} KB)`);
         }
     } catch (e) {
         console.error('Error syncing cached_coverage.json:', e);
@@ -1171,12 +1276,12 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Strict startup sequence:
     // 1. Seed IndexedDB from cached_coverage.json / .csv (no-op if already up to date)
-    // 2. If cached_coverage.json was missing on disk, write the current DB back to it (localhost only)
+    // 2. If cached_coverage.json was missing or legacy format, resync as bitmap (localhost only)
     // 3. Load all cached points into scanResults and render markers into markersLayer
     // 4. Explicitly apply the default map visibility: heatmap ON, point markers HIDDEN
     seedFromFile()
-        .then(async ({ jsonFound }) => {
-            if (!jsonFound) {
+        .then(async ({ jsonFound, isBitmap }) => {
+            if (!jsonFound || !isBitmap) {
                 await syncCoverageJsonToServer();
             }
             await loadFromIndexedDB(true);
