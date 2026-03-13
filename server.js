@@ -21,7 +21,7 @@ app.use(
 );
 
 // Parse JSON request bodies (only affects non-proxied routes below this line)
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: "100mb" }));
 
 // Write the current IndexedDB state to cached_coverage.json.
 // Called by the client when the file is missing on startup so the local cache stays in sync.
