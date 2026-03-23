@@ -7,7 +7,7 @@ const app = express();
 const PORT = 3000;
 const COVERAGE_FILE = path.join(__dirname, "cached_coverage.json");
 
-// Proxy /api/rsm/* → https://geo.tunisietelecom.tn/rsm/*
+// Proxy /api/rsm/* → https://gis.tunisietelecom.tn/rsm/*
 // IMPORTANT: this must be registered BEFORE express.json() so the raw request
 // body stream is forwarded intact to the upstream server.  If a body-parser
 // middleware runs first it consumes the stream and the proxy sends an empty body,
@@ -15,8 +15,10 @@ const COVERAGE_FILE = path.join(__dirname, "cached_coverage.json");
 app.use(
     "/api/rsm",
     createProxyMiddleware({
-        target: "https://geo.tunisietelecom.tn/rsm",
+        target: "https://gis.tunisietelecom.tn",
         changeOrigin: true,
+        pathRewrite: { "^/": "/rsm/" },
+        secure: false, // TT server has an untrusted SSL certificate
     })
 );
 
@@ -41,5 +43,5 @@ app.use(express.static(path.join(__dirname)));
 
 app.listen(PORT, () => {
     console.log(`Dev server running at http://localhost:${PORT}`);
-    console.log(`API requests to /api/rsm/* are proxied to https://geo.tunisietelecom.tn/rsm/*`);
+    console.log(`API requests to /api/rsm/* are proxied to https://gis.tunisietelecom.tn/rsm/*`);
 });

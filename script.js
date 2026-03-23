@@ -15,7 +15,7 @@ const COORDINATE_TOLERANCE = 0.00001; // Tolerance for comparing coordinates
 const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 const API_BASE_URL = isLocalhost
     ? "/api/rsm/RSMService.svc"
-    : "https://geo.tunisietelecom.tn/rsm/RSMService.svc";
+    : "https://gis.tunisietelecom.tn/rsm/RSMService.svc";
 
 /**
  * Build API URL for the given endpoint path.
@@ -241,6 +241,7 @@ async function checkCoverage(lat, lng) {
     const payload = {
         TaghtiaRequest: {
             token: token,
+            fwa: 0,
             X: coded.xCoded,
             Y: coded.yCoded
         }
@@ -392,6 +393,16 @@ function addMarker(lat, lng, result, isError = false) {
         // Add VDSL info if available
         if (result.taghtiaVDSL && result.taghtiaVDSL.Taghtia == "OUI") {
             popupContent += `<p><strong>VDSL:</strong> Available</p>`;
+        }
+        
+        // Add FWA (5G Fixed Wireless Access) info if available
+        if (result.taghtiaFWA && result.taghtiaFWA.Taghtia == "OUI" && result.taghtiaFWA.Code_taghtia == "200") {
+            popupContent += `<p><strong>5G FWA:</strong> Available (Class ${result.taghtiaFWA.Classe})</p>`;
+            if (result.taghtiaFWA.saturated === 1) {
+                popupContent += `<p><strong>FWA Zone:</strong> <span style="color:red">Saturated</span></p>`;
+            } else if (result.taghtiaFWA.saturated === 0) {
+                popupContent += `<p><strong>FWA Zone:</strong> <span style="color:green">Capacity Available</span></p>`;
+            }
         }
         
         // Add PC info if available
