@@ -18,10 +18,24 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay hidden">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p id="loadingMessage">Loading...</p>
+        </div>
+    </div>
+
     <!-- Disclaimer Banner -->
     <div class="disclaimer-banner">
         ⚠️ <strong>Disclaimer:</strong> This is for educational purposes only. The API used belongs to Tunisie Telecom and is not public.
     </div>
+
+    <!-- Mobile Sidebar Toggle -->
+    <button class="mobile-toggle" id="sidebarToggle" aria-label="Toggle sidebar">☰</button>
+
+    <!-- Sidebar Backdrop (mobile) -->
+    <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
 
     <div class="container-fluid h-100">
         <div class="row h-100">
@@ -78,13 +92,13 @@
                             <h6 class="mb-0">Scan Controls</h6>
                         </div>
                         <div class="card-body">
-                            <button class="btn btn-success btn-sm w-100 mb-2" id="startBtn">
+                            <button type="button" class="btn btn-success btn-sm w-100 mb-2" id="startBtn">
                                 <i class="bi bi-play-fill"></i> Start Scan
                             </button>
-                            <button class="btn btn-warning btn-sm w-100 mb-2" id="pauseBtn" disabled>
+                            <button type="button" class="btn btn-warning btn-sm w-100 mb-2" id="pauseBtn" disabled>
                                 <i class="bi bi-pause-fill"></i> Pause
                             </button>
-                            <button class="btn btn-danger btn-sm w-100" id="stopBtn" disabled>
+                            <button type="button" class="btn btn-danger btn-sm w-100" id="stopBtn" disabled>
                                 <i class="bi bi-stop-fill"></i> Stop
                             </button>
                         </div>
@@ -102,6 +116,7 @@
                             <p class="small mb-1 text-center" id="progressText">Ready to scan</p>
                             <p class="small mb-0 text-center text-muted" id="speedText"></p>
                             <p class="small mb-0 text-center text-muted" id="coverageInfo"></p>
+                            <p class="small mb-0 text-center" id="currentRequestStatus"></p>
                         </div>
                     </div>
 
@@ -155,6 +170,12 @@
                                 </label>
                             </div>
                             <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="showLegend" checked>
+                                <label class="form-check-label small" for="showLegend">
+                                    Show Legend
+                                </label>
+                            </div>
+                            <div class="form-check mb-2">
                                 <input class="form-check-input" type="checkbox" id="drawRectangle">
                                 <label class="form-check-label small" for="drawRectangle">
                                     Draw Custom Bounds
@@ -169,20 +190,20 @@
                             <h6 class="mb-0">Actions</h6>
                         </div>
                         <div class="card-body">
-                            <button class="btn btn-primary btn-sm w-100 mb-2" id="exportJsonBtn">
+                            <button type="button" class="btn btn-primary btn-sm w-100 mb-2" id="exportJsonBtn">
                                 Export JSON
                             </button>
-                            <button class="btn btn-primary btn-sm w-100 mb-2" id="exportCsvBtn">
+                            <button type="button" class="btn btn-primary btn-sm w-100 mb-2" id="exportCsvBtn">
                                 Export CSV
                             </button>
-                            <button class="btn btn-secondary btn-sm w-100 mb-2" id="importJsonBtn">
+                            <button type="button" class="btn btn-secondary btn-sm w-100 mb-2" id="importJsonBtn">
                                 Import JSON
                             </button>
                             <input type="file" id="importJsonInput" accept=".json" style="display:none">
-                            <button class="btn btn-secondary btn-sm w-100 mb-2" id="loadPreviousBtn">
+                            <button type="button" class="btn btn-secondary btn-sm w-100 mb-2" id="loadPreviousBtn">
                                 Load Previous Results
                             </button>
-                            <button class="btn btn-outline-danger btn-sm w-100" id="clearBtn">
+                            <button type="button" class="btn btn-outline-danger btn-sm w-100" id="clearBtn">
                                 Clear All
                             </button>
                         </div>
@@ -195,7 +216,8 @@
                 <div id="map"></div>
                 
                 <!-- Map Legend -->
-                <div class="map-legend">
+                <div class="map-legend" id="mapLegend">
+                    <button class="legend-close-btn" id="legendCloseBtn" aria-label="Hide legend">&times;</button>
                     <h6 class="mb-2">Legend</h6>
                     <div class="legend-item">
                         <span class="legend-color" style="background-color: #28a745;"></span>
@@ -210,6 +232,9 @@
                         <span class="small">Error / Skipped</span>
                     </div>
                 </div>
+
+                <!-- Legend Toggle Button (shown when legend is hidden) -->
+                <button class="legend-toggle-btn hidden" id="legendToggleBtn" aria-label="Show legend">🗺️</button>
             </div>
         </div>
     </div>

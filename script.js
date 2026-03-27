@@ -125,6 +125,20 @@ let stats = {
     cached: 0
 };
 
+// ===== Loading Overlay Helpers =====
+
+function showLoading(message) {
+    const overlay = document.getElementById('loadingOverlay');
+    const msgEl = document.getElementById('loadingMessage');
+    if (msgEl) msgEl.textContent = message || 'Loading...';
+    if (overlay) overlay.classList.remove('hidden');
+}
+
+function hideLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
 // ===== Token Generation Functions =====
 
 /**
@@ -686,10 +700,12 @@ async function startScan() {
         const point = points[i];
         const cacheKey = `${point.lat},${point.lng}`;
         const cached = cachedPointsMap.get(cacheKey);
+        const reqStatus = document.getElementById('currentRequestStatus');
 
         try {
             if (cached && !cached.isError) {
                 // Use cached result — no API call needed
+                if (reqStatus) reqStatus.textContent = `💾 Cached — (${point.lat.toFixed(4)}, ${point.lng.toFixed(4)})`;
                 const markerData = addMarker(cached.lat, cached.lng, cached.result, false);
                 scanResults.push({ ...markerData, isError: false });
                 stats.total++;
@@ -701,10 +717,12 @@ async function startScan() {
                 }
             } else {
                 // Fresh API call
+                if (reqStatus) reqStatus.textContent = `⏳ Checking (${point.lat.toFixed(4)}, ${point.lng.toFixed(4)})...`;
                 const { result, isError } = await processPoint(point);
 
                 if (isError) {
                     stats.errors++;
+                    if (reqStatus) reqStatus.textContent = `⚠️ Error — (${point.lat.toFixed(4)}, ${point.lng.toFixed(4)})`;
                 }
 
                 // Add marker and update results
@@ -716,8 +734,10 @@ async function startScan() {
                     stats.total++;
                     if (markerData.available) {
                         stats.available++;
+                        if (reqStatus) reqStatus.textContent = `✅ Available — (${point.lat.toFixed(4)}, ${point.lng.toFixed(4)})`;
                     } else {
                         stats.notAvailable++;
+                        if (reqStatus) reqStatus.textContent = `🔴 Not available — (${point.lat.toFixed(4)}, ${point.lng.toFixed(4)})`;
                     }
                     // Save to IndexedDB cache (non-blocking) — only available points
                     if (markerData.available) {
@@ -767,6 +787,7 @@ async function startScan() {
         document.getElementById('progressText').textContent =
             `Scan complete! ${stats.total} points in ${totalTime}s (${stats.cached} cached, ${freshCount} fresh).`;
         document.getElementById('speedText').textContent = '';
+        document.getElementById('currentRequestStatus').textContent = '';
         updateHeatmap();
         updateCoverageInfo();
         syncCoverageJsonToServer();
@@ -815,6 +836,7 @@ function stopScan() {
     document.getElementById('pauseBtn').classList.remove('btn-info');
     document.getElementById('pauseBtn').classList.add('btn-warning');
     document.getElementById('progressText').textContent = 'Scan stopped';
+    document.getElementById('currentRequestStatus').textContent = '';
     
     if (scanResults.length > 0) {
         updateHeatmap();
@@ -826,6 +848,7 @@ function stopScan() {
  * Export all cached results as JSON
  */
 async function exportJSON() {
+    showLoading('Exporting JSON...');
     let allPoints;
     try {
         allPoints = await getAllCachedPoints();
@@ -835,6 +858,7 @@ async function exportJSON() {
     }
 
     if (allPoints.length === 0) {
+        hideLoading();
         alert('No cached results to export');
         return;
     }
@@ -852,12 +876,14 @@ async function exportJSON() {
     a.download = `sfax-fiber-scan-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    hideLoading();
 }
 
 /**
  * Export all cached results as CSV
  */
 async function exportCSV() {
+    showLoading('Exporting CSV...');
     let allPoints;
     try {
         allPoints = await getAllCachedPoints();
@@ -867,6 +893,7 @@ async function exportCSV() {
     }
 
     if (allPoints.length === 0) {
+        hideLoading();
         alert('No cached results to export');
         return;
     }
@@ -887,6 +914,7 @@ async function exportCSV() {
     a.download = `sfax-fiber-scan-${Date.now()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+    hideLoading();
 }
 
 // ===== IndexedDB Persistence Functions =====
@@ -896,17 +924,18 @@ async function exportCSV() {
  * @param {boolean} silent - when true, suppress informational alerts (used for auto-load on startup)
  */
 async function loadFromIndexedDB(silent = false) {
+    if (!silent) showLoading('Loading results from cache...');
     let allCached;
     try {
         allCached = await getAllCachedPoints();
     } catch (e) {
         console.error('Error loading from IndexedDB:', e);
-        if (!silent) alert('Error loading cached results');
+        if (!silent) { hideLoading(); alert('Error loading cached results'); }
         return;
     }
 
     if (allCached.length === 0) {
-        if (!silent) alert('No cached results found');
+        if (!silent) { hideLoading(); alert('No cached results found'); }
         return;
     }
 
@@ -965,6 +994,7 @@ async function loadFromIndexedDB(silent = false) {
     updateHeatmap();
 
     if (!silent) {
+        hideLoading();
         alert(`Loaded ${allCached.length} cached points from IndexedDB`);
     }
 }
@@ -983,12 +1013,14 @@ async function handleImportJSON(event) {
     const file = event.target.files[0];
     if (!file) return;
 
+    showLoading('Importing data...');
     try {
         const text = await file.text();
         const data = JSON.parse(text);
 
         const results = data.results || [];
         if (results.length === 0) {
+            hideLoading();
             alert('No results found in the JSON file');
             return;
         }
@@ -1012,10 +1044,12 @@ async function handleImportJSON(event) {
             importedCount++;
         }
 
+        hideLoading();
         alert(`Imported ${importedCount} points into the cache. Click "Load Previous Results" to display them.`);
         updateCoverageInfo();
     } catch (error) {
         console.error('Error importing JSON:', error);
+        hideLoading();
         alert('Error importing JSON file. Please make sure it is a valid scan export.');
     }
 
@@ -1047,9 +1081,10 @@ function clearAll() {
     document.getElementById('coverageInfo').textContent = '';
 
     if (confirm('Also clear the IndexedDB cache? This permanently deletes all saved scan data.')) {
+        showLoading('Clearing cache...');
         clearCachedPoints()
-            .then(() => alert('IndexedDB cache cleared.'))
-            .catch(e => console.error('Error clearing cache:', e));
+            .then(() => { hideLoading(); alert('IndexedDB cache cleared.'); })
+            .catch(e => { hideLoading(); console.error('Error clearing cache:', e); });
     }
 }
 
@@ -1307,13 +1342,75 @@ document.addEventListener('DOMContentLoaded', function() {
     // 2. If cached_coverage.json was missing or legacy format, resync as bitmap (localhost only)
     // 3. Load all cached points into scanResults and render markers into markersLayer
     // 4. Explicitly apply the default map visibility: heatmap ON, point markers HIDDEN
+    // Sidebar toggle (mobile)
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebar = document.getElementById('sidebar');
+    const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+
+    function openSidebar() {
+        sidebar.classList.add('show');
+        sidebarBackdrop.classList.remove('hidden');
+        sidebarToggle.textContent = '\u2715';
+    }
+
+    function closeSidebar() {
+        sidebar.classList.remove('show');
+        sidebarBackdrop.classList.add('hidden');
+        sidebarToggle.textContent = '\u2630';
+    }
+
+    sidebarToggle.addEventListener('click', function() {
+        if (sidebar.classList.contains('show')) {
+            closeSidebar();
+        } else {
+            openSidebar();
+        }
+    });
+
+    sidebarBackdrop.addEventListener('click', closeSidebar);
+
+    // Legend toggle
+    const mapLegend = document.getElementById('mapLegend');
+    const legendToggleBtn = document.getElementById('legendToggleBtn');
+    const legendCloseBtn = document.getElementById('legendCloseBtn');
+    const showLegendCheckbox = document.getElementById('showLegend');
+
+    function setLegendVisible(visible) {
+        if (visible) {
+            mapLegend.classList.remove('hidden');
+            legendToggleBtn.classList.add('hidden');
+            showLegendCheckbox.checked = true;
+        } else {
+            mapLegend.classList.add('hidden');
+            legendToggleBtn.classList.remove('hidden');
+            showLegendCheckbox.checked = false;
+        }
+    }
+
+    legendCloseBtn.addEventListener('click', function() {
+        setLegendVisible(false);
+    });
+
+    legendToggleBtn.addEventListener('click', function() {
+        setLegendVisible(true);
+    });
+
+    showLegendCheckbox.addEventListener('change', function(e) {
+        setLegendVisible(e.target.checked);
+    });
+
+    // Strict startup sequence with loading overlay
+    showLoading('Loading cached coverage data...');
     seedFromFile()
         .then(async ({ jsonFound, isBitmap }) => {
             if (!jsonFound || !isBitmap) {
+                showLoading('Saving coverage data...');
                 await syncCoverageJsonToServer();
             }
+            showLoading('Rendering map data...');
             await loadFromIndexedDB(true);
             applyInitialMapVisibility();
+            hideLoading();
         })
-        .catch(e => console.error('Error initializing data:', e));
+        .catch(e => { hideLoading(); console.error('Error initializing data:', e); });
 });
