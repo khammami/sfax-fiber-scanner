@@ -1,3 +1,19 @@
+// ===== Utilities =====
+
+/**
+ * Escape a value for safe inclusion in HTML.
+ * Prevents XSS when interpolating API response data into popup content.
+ */
+function escapeHtml(unsafe) {
+    if (unsafe == null) return '';
+    return String(unsafe)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 // ===== Global Variables =====
 let map;
 let markersLayer;
@@ -372,17 +388,17 @@ function addMarker(lat, lng, result, isError = false) {
         fillOpacity: 0.25
     });
 
-    // Create popup content
+    // Create popup content — all dynamic values are escaped to prevent XSS
     let popupContent = `
         <div>
-            <h6>${status}</h6>
+            <h6>${escapeHtml(status)}</h6>
             <p><strong>Coordinates:</strong><br>
-            Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}</p>
+            Lat: ${escapeHtml(lat.toFixed(5))}, Lng: ${escapeHtml(lng.toFixed(5))}</p>
     `;
 
     if (!isError && result && result.taghtiaGPON) {
         if (available && result.taghtiaGPON.Debit) {
-            popupContent += `<p><strong>Speed:</strong> ${result.taghtiaGPON.Debit}</p>`;
+            popupContent += `<p><strong>Speed:</strong> ${escapeHtml(result.taghtiaGPON.Debit)}</p>`;
         }
         
         // Add ADSL info if available
@@ -397,7 +413,7 @@ function addMarker(lat, lng, result, isError = false) {
         
         // Add FWA (5G Fixed Wireless Access) info if available
         if (result.taghtiaFWA && result.taghtiaFWA.Taghtia == "OUI" && result.taghtiaFWA.Code_taghtia == "200") {
-            popupContent += `<p><strong>5G FWA:</strong> Available (Class ${result.taghtiaFWA.Classe})</p>`;
+            popupContent += `<p><strong>5G FWA:</strong> Available (Class ${escapeHtml(result.taghtiaFWA.Classe)})</p>`;
             if (result.taghtiaFWA.saturated === 1) {
                 popupContent += `<p><strong>FWA Zone:</strong> <span style="color:red">Saturated</span></p>`;
             } else if (result.taghtiaFWA.saturated === 0) {
@@ -407,7 +423,7 @@ function addMarker(lat, lng, result, isError = false) {
         
         // Add PC info if available
         if (result.taghtiaGPON.PC_CODE) {
-            popupContent += `<p><strong>PC Code:</strong> ${result.taghtiaGPON.PC_CODE}</p>`;
+            popupContent += `<p><strong>PC Code:</strong> ${escapeHtml(result.taghtiaGPON.PC_CODE)}</p>`;
         }
     }
 
@@ -917,9 +933,9 @@ async function loadFromIndexedDB(silent = false) {
 
         marker.bindPopup(`
             <div>
-                <h6>${status}</h6>
+                <h6>${escapeHtml(status)}</h6>
                 <p><strong>Coordinates:</strong><br>
-                Lat: ${cached.lat.toFixed(5)}, Lng: ${cached.lng.toFixed(5)}</p>
+                Lat: ${escapeHtml(cached.lat.toFixed(5))}, Lng: ${escapeHtml(cached.lng.toFixed(5))}</p>
             </div>
         `);
 
@@ -1162,13 +1178,14 @@ async function tryImportSeedCSV(url) {
 
 /**
  * Seed the IndexedDB from optional data files in the app root.
- * Tries cached_coverage.json first, then cached_coverage.csv.
+ * Tries cached_coverage.json first; falls back to cached_coverage.csv only if JSON was absent.
  * Already-cached keys are never overwritten.
  * Returns { totalImported, jsonFound } — jsonFound=true when cached_coverage.json existed.
  */
 async function seedFromFile() {
     const json = await tryImportSeedJSON('./cached_coverage.json');
-    const csvCount = await tryImportSeedCSV('./cached_coverage.csv');
+    // Only try CSV fallback if JSON seed file was not found (avoids a 404 console error)
+    const csvCount = json.found ? 0 : await tryImportSeedCSV('./cached_coverage.csv');
     return { totalImported: json.count + csvCount, jsonFound: json.found, isBitmap: json.isBitmap || false };
 }
 
