@@ -25,19 +25,20 @@ npm install
 npm run dev
 ```
 
-Then open **http://localhost:3000** in your browser.
+Then open **<http://localhost:3000>** in your browser.
 
 The dev server:
+
 - Serves `index.html`, `script.js`, `style.css`, and other static files
-- Proxies API requests from `/api/rsm/*` to `https://geo.tunisietelecom.tn/rsm/*`
+- Proxies API requests from `/api/rsm/*` to `https://gis.tunisietelecom.tn/rsm/*`
 
 > [!WARNING]
-> Opening `index.html` directly as a file (`file://`) or via a simple file server that does not proxy API calls will result in CORS errors because the browser blocks cross-origin requests to `geo.tunisietelecom.tn`.
+> Opening `index.html` directly as a file (`file://`) or via a simple file server that does not proxy API calls will result in CORS errors because the browser blocks cross-origin requests to `gis.tunisietelecom.tn`.
 
 ## How to Use
 
 1. **Open the Application**
-   - Run `npm run dev` and open **http://localhost:3000** (see [Local Development](#local-development) above)
+   - Run `npm run dev` and open **<http://localhost:3000>** (see [Local Development](#local-development) above)
    - Or deploy to GitHub Pages / a custom domain — API calls go directly without a proxy
 
 2. **Configure Scan Area**
@@ -87,7 +88,7 @@ The Tunisie Telecom API requires a unique token for each request:
 
 ```javascript
 async function getToken() {
-    const response = await fetch("https://geo.tunisietelecom.tn/rsm/RSMService.svc/getAppVersion");
+    const response = await fetch("https://gis.tunisietelecom.tn/rsm/RSMService.svc/getAppVersion");
     const data = await response.json();
     // ... token calculation logic
     return token;
@@ -118,6 +119,7 @@ function codeCoordinates(x, y) {
 ### Coverage Check
 
 For each point in the grid:
+
 1. Encode the coordinates
 2. Send POST request to `TaghtiaUltimate` endpoint
 3. Check response for GPON availability
@@ -127,6 +129,7 @@ For each point in the grid:
 ### Grid Scanning
 
 The application generates a grid of points based on:
+
 - Latitude range (min to max)
 - Longitude range (min to max)
 - Step size (default 0.002° ≈ 200 meters)
@@ -148,13 +151,15 @@ Points are scanned sequentially with configurable delays between requests.
 
 This application uses the Tunisie Telecom coverage API (reverse-engineered):
 
-**Base URL**: `https://geo.tunisietelecom.tn/rsm/RSMService.svc/`
+**Base URL**: `https://gis.tunisietelecom.tn/rsm/RSMService.svc/`
 
 **Endpoints**:
+
 - `getAppVersion` - Get server time for token generation
 - `TaghtiaUltimate` - Check coverage for coordinates
 
 **GPON Availability Check**:
+
 ```javascript
 if (result.taghtiaGPON.Code_taghtia == 200 && 
     result.taghtiaGPON.Message_taghtia == "OK" && 
@@ -185,11 +190,13 @@ sfax-fiber-scanner/
 ## Credits
 
 This project is inspired by and uses API information reverse-engineered from:
+
 - [Jev1337/More-Taghtia](https://github.com/Jev1337/More-Taghtia)
 
 ## Disclaimer
 
-⚠️ **Important**: This application is for **educational purposes only**. 
+> [!CAUTION]
+> ⚠️ **Important**: This application is for **educational purposes only**.
 
 - The API used belongs to **Tunisie Telecom** and is not officially public
 - This tool should be used responsibly and not for commercial purposes
