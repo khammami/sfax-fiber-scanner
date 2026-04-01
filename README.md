@@ -31,7 +31,7 @@ The dev server:
 - Serves `index.html`, `script.js`, `style.css`, and other static files
 - Proxies API requests from `/api/rsm/*` to `https://geo.tunisietelecom.tn/rsm/*`
 
-> [!TIP]
+> [!WARNING]
 > Opening `index.html` directly as a file (`file://`) or via a simple file server that does not proxy API calls will result in CORS errors because the browser blocks cross-origin requests to `geo.tunisietelecom.tn`.
 
 ## How to Use
