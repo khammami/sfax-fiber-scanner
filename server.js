@@ -1,5 +1,5 @@
 const express = require("express");
-const { createProxyMiddleware } = require("http-proxy-middleware");
+const https = require("https");
 const helmet = require("helmet");
 const path = require("path");
 const fs = require("fs");
@@ -50,20 +50,59 @@ app.use(helmet({
     referrerPolicy: { policy: "strict-origin-when-cross-origin" },
 }));
 
-// Proxy /api/rsm/* → https://gis.tunisietelecom.tn/rsm/*
+// Manual proxy: /api/rsm/* → https://gis.tunisietelecom.tn/rsm/*
+// Uses a fresh HTTPS request per call with no connection pooling, matching what
+// a browser would do when talking to the upstream directly.
 // IMPORTANT: this must be registered BEFORE express.json() so the raw request
-// body stream is forwarded intact to the upstream server.  If a body-parser
-// middleware runs first it consumes the stream and the proxy sends an empty body,
-// causing the upstream to hang on POST requests.
-app.use(
-    "/api/rsm",
-    createProxyMiddleware({
-        target: "https://gis.tunisietelecom.tn",
-        changeOrigin: true,
-        pathRewrite: { "^/": "/rsm/" },
-        secure: false, // TT server has an untrusted SSL certificate
-    })
-);
+// body stream is forwarded intact to the upstream server.
+app.use("/api/rsm", (req, res) => {
+    const upstreamPath = "/rsm" + req.url;
+    const chunks = [];
+
+    // Collect the raw request body (if any)
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+        const body = chunks.length ? Buffer.concat(chunks) : null;
+
+        const options = {
+            hostname: "gis.tunisietelecom.tn",
+            path: upstreamPath,
+            method: req.method,
+            headers: {
+                ...(req.headers["content-type"] && { "Content-Type": req.headers["content-type"] }),
+                ...(req.headers["accept"] && { Accept: req.headers["accept"] }),
+                ...(body && { "Content-Length": body.length }),
+            },
+            // No connection reuse — upstream sends Connection: close
+            agent: false,
+            rejectUnauthorized: false,
+            timeout: 30000,
+        };
+
+        const proxyReq = https.request(options, (proxyRes) => {
+            res.writeHead(proxyRes.statusCode, proxyRes.headers);
+            proxyRes.pipe(res);
+        });
+
+        proxyReq.on("timeout", () => {
+            console.error(`Proxy timeout [${req.method} ${req.originalUrl}]`);
+            proxyReq.destroy();
+            if (!res.headersSent) {
+                res.status(504).json({ error: "Upstream server timed out", code: "ETIMEDOUT" });
+            }
+        });
+
+        proxyReq.on("error", (err) => {
+            console.error(`Proxy error [${req.method} ${req.originalUrl}]: ${err.code || err.message}`);
+            if (!res.headersSent) {
+                res.status(502).json({ error: "Upstream request failed", code: err.code || "UNKNOWN" });
+            }
+        });
+
+        if (body) proxyReq.write(body);
+        proxyReq.end();
+    });
+});
 
 // Parse JSON request bodies (only affects non-proxied routes below this line)
 app.use(express.json({ limit: "100mb" }));
