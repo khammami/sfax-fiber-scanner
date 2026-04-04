@@ -75,8 +75,7 @@ app.use("/api/rsm", (req, res) => {
             },
             // No connection reuse — upstream sends Connection: close
             agent: false,
-            rejectUnauthorized: false,
-            timeout: 30000,
+            rejectUnauthorized: false
         };
 
         const proxyReq = https.request(options, (proxyRes) => {
