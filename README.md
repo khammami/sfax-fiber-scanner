@@ -177,7 +177,7 @@ if (result.taghtiaGPON.Code_taghtia == 200 &&
 
 ## Project Structure
 
-```
+```console
 sfax-fiber-scanner/
 ├── index.html      # Main HTML page with map and UI
 ├── style.css       # Styles and responsive design
@@ -203,6 +203,7 @@ This project is inspired by and uses API information reverse-engineered from:
 - The author is not responsible for any misuse of this application
 - Please respect rate limits and do not overload the API servers
 - This is an unofficial tool and is not affiliated with Tunisie Telecom
+- The official website for checking TT coverage: [Taghtia](https://gis.tunisietelecom.tn/mytaghtia/)
 
 ## License
 
