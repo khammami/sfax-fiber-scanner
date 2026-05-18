@@ -706,7 +706,12 @@ async function startScan() {
             if (cached && !cached.isError) {
                 // Use cached result — no API call needed
                 if (reqStatus) reqStatus.textContent = `💾 Cached — (${point.lat.toFixed(4)}, ${point.lng.toFixed(4)})`;
-                const markerData = addMarker(cached.lat, cached.lng, cached.result, false);
+                // Bitmap-seeded entries have result:null — synthesize a minimal
+                // result so addMarker classifies them correctly as available.
+                const effectiveResult = cached.result ?? (cached.available
+                    ? { taghtiaGPON: { Code_taghtia: 200, Message_taghtia: "OK", Taghtia: "OUI" } }
+                    : null);
+                const markerData = addMarker(cached.lat, cached.lng, effectiveResult, false);
                 scanResults.push({ ...markerData, isError: false });
                 stats.total++;
                 stats.cached++;
