@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "Local dev server for Sfax Fiber Scanner with API proxy",
   "scripts": {
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "node test/proxy-headers.test.js"
   },
   "dependencies": {
     "express": "^5.2.1",
