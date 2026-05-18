@@ -55,6 +55,14 @@ app.use(helmet({
 // body stream is forwarded intact to the upstream server.  If a body-parser
 // middleware runs first it consumes the stream and the proxy sends an empty body,
 // causing the upstream to hang on POST requests.
+//
+// The upstream API returns 403 for desktop browser requests.  We spoof a mobile
+// User-Agent and strip Chromium client-hint / Fetch-metadata headers that
+// fingerprint a desktop browser before forwarding to the target.
+const MOBILE_UA =
+    "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
+
 app.use(
     "/api/rsm",
     createProxyMiddleware({
@@ -62,6 +70,30 @@ app.use(
         changeOrigin: true,
         pathRewrite: { "^/": "/rsm/" },
         secure: false, // TT server has an untrusted SSL certificate
+        on: {
+            proxyReq(proxyReq) {
+                // The upstream IIS server enforces Referer-based hotlink protection:
+                // requests without a Referer matching its own domain get 403.
+                // The browser sends Referer: http://localhost:3000/ which is rejected,
+                // so we override it with the upstream origin before forwarding.
+                proxyReq.setHeader("referer", "https://gis.tunisietelecom.tn/");
+
+                // Override User-Agent with a mobile browser string.
+                proxyReq.setHeader("user-agent", MOBILE_UA);
+
+                // Remove Chromium client-hint headers — these betray a desktop
+                // browser even when the UA string says otherwise.
+                // sec-ch-ua-mobile: ?0  means "not a mobile device" → 403
+                proxyReq.removeHeader("sec-ch-ua");
+                proxyReq.removeHeader("sec-ch-ua-mobile");
+                proxyReq.removeHeader("sec-ch-ua-platform");
+
+                // Remove Fetch metadata headers (browser-only context signals).
+                proxyReq.removeHeader("sec-fetch-site");
+                proxyReq.removeHeader("sec-fetch-mode");
+                proxyReq.removeHeader("sec-fetch-dest");
+            },
+        },
     })
 );
 
