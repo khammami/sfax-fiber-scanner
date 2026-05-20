@@ -268,6 +268,8 @@ html, body {
     border: 2px solid var(--tt-blue);
     border-radius: 5px;
     padding: 8px 12px;
+    min-width: 44px;
+    min-height: 44px;
     cursor: pointer;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
