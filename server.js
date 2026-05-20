@@ -69,7 +69,7 @@ app.use(
         target: "https://gis.tunisietelecom.tn",
         changeOrigin: true,
         pathRewrite: { "^/": "/rsm/" },
-        secure: false, // TT server has an untrusted SSL certificate
+        secure: process.env.PROXY_SECURE === "true", // Target server has an untrusted certificate by default; set PROXY_SECURE=true to enforce strict TLS verification
         on: {
             proxyReq(proxyReq) {
                 // The upstream IIS server enforces Referer-based hotlink protection:
@@ -102,7 +102,7 @@ app.use(express.json({ limit: "100mb" }));
 
 // Write the current IndexedDB state to cached_coverage.json.
 // Called by the client when the file is missing on startup so the local cache stays in sync.
-app.post("/api/save-coverage", (req, res) => {
+app.post("/api/save-coverage", async (req, res) => {
     const body = req.body;
 
     // Validate expected payload shape to prevent arbitrary file writes
@@ -125,7 +125,7 @@ app.post("/api/save-coverage", (req, res) => {
     }
 
     try {
-        fs.writeFileSync(COVERAGE_FILE, JSON.stringify(body, null, 2), "utf-8");
+        await fs.promises.writeFile(COVERAGE_FILE, JSON.stringify(body, null, 2), "utf-8");
         console.log(`cached_coverage.json updated (${body.totalPoints ?? "?"} points)`);
         res.json({ ok: true });
     } catch (err) {
